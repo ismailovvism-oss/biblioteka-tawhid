@@ -246,8 +246,18 @@ function updateActive() {
     if (activeEl) activeEl.classList.add('active');
     updateBookmarkBtn();
   }
+  updateProgress();
   updatePageIndicator();
   rememberPosition();
+}
+
+let bookPct = 0;
+function updateProgress() {
+  if (!book || !book.chapters.length) { bookPct = 0; return; }
+  const max = document.documentElement.scrollHeight - window.innerHeight;
+  const cf = max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0;
+  bookPct = Math.round(((chapterIndex + cf) / book.chapters.length) * 100);
+  document.body.style.setProperty('--progress', bookPct + '%');
 }
 
 /* позиция чтения сохраняется с задержкой — не дёргать localStorage на каждый кадр */
@@ -267,7 +277,8 @@ function currentPage() {
 
 function updatePageIndicator() {
   const p = currentPage();
-  $('#page-indicator').textContent = p != null ? 'стр. ' + p : 'стр. —';
+  const pg = p != null ? 'стр. ' + p : 'стр. —';
+  $('#page-indicator').textContent = book ? `${pg} · ${bookPct}%` : pg;
   $('#btn-scan').hidden = !(book && book.hasImages && p != null);
 }
 

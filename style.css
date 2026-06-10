@@ -64,6 +64,24 @@ button:active { background: var(--accent-soft); }
 #topbar { top: 0; border-bottom: 1px solid var(--border); }
 #bottombar { bottom: 0; border-top: 1px solid var(--border); justify-content: space-between; }
 
+#progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 21;
+  height: 3px;
+  pointer-events: none;
+}
+#progress i {
+  display: block;
+  height: 100%;
+  width: var(--progress, 0%);
+  background: var(--accent);
+  transition: width 0.15s linear;
+}
+body[data-view="library"] #progress { display: none; }
+
 #chapter-title {
   flex: 1;
   min-width: 0;
