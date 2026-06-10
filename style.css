@@ -82,7 +82,7 @@ button:active { background: var(--accent-soft); }
 #stream {
   max-width: 46rem;
   margin: 0 auto;
-  padding: 0.5rem 0.8rem;
+  padding: 0.5rem var(--read-pad, 0.8rem);
 }
 
 .pair {

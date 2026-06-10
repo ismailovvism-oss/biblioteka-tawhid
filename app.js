@@ -14,7 +14,8 @@ const DEFAULTS = {
   fnMode: 'inline',    // inline | jump
   debug: false,        // панель валидатора
   swap: false,         // менять местами оригинал/перевод в паре
-  fonts: {},           // lang → { family, size(em) }
+  fonts: {},           // lang → { family, size(em), line(line-height) }
+  margin: 0.8,         // боковые поля колонки чтения, rem
   last: {},            // bookId → { chapter, sector, page, ts }
   bookmarks: {},       // bookId → [ { id, chapter, page, note, ts } ]
 };
@@ -604,10 +605,11 @@ function fontChoicesFor(lang) {
 function ensureFontDefaults() {
   for (const lang of book.languages) {
     const cur = settings.fonts[lang] || {};
-    const defSize = book.rtl.includes(lang) ? 1.35 : 1; // арабский крупнее по умолчанию
+    const rtl = book.rtl.includes(lang);
     settings.fonts[lang] = {
       family: cur.family || fontChoicesFor(lang)[0].stack,
-      size: typeof cur.size === 'number' ? cur.size : defSize,
+      size: typeof cur.size === 'number' ? cur.size : (rtl ? 1.35 : 1),     // арабский крупнее
+      line: typeof cur.line === 'number' ? cur.line : (rtl ? 1.95 : 1.65),  // и просторнее
     };
   }
 }
@@ -618,7 +620,7 @@ function applyFonts() {
   let css = '';
   for (const lang of book.languages) {
     const f = settings.fonts[lang];
-    if (f) css += `.member.lang-${lang}{font-family:${f.family};font-size:${f.size}em;}\n`;
+    if (f) css += `.member.lang-${lang}{font-family:${f.family};font-size:${f.size}em;line-height:${f.line};}\n`;
   }
   let el = document.getElementById('dyn-fonts');
   if (!el) {
@@ -627,6 +629,7 @@ function applyFonts() {
     document.head.appendChild(el);
   }
   el.textContent = css;
+  document.body.style.setProperty('--read-pad', settings.margin + 'rem');
 }
 
 // контролы строятся под языки текущей книги (rtl/ltr → разный список гарнитур)
@@ -661,29 +664,47 @@ function setupFontSettings() {
     famLabel.appendChild(sel);
     group.appendChild(famLabel);
 
-    const sizeLabel = document.createElement('label');
-    sizeLabel.append('Размер');
-    const rng = document.createElement('input');
-    rng.type = 'range';
-    rng.min = '0.7';
-    rng.max = '2.4';
-    rng.step = '0.05';
-    rng.value = String(f.size);
-    const val = document.createElement('span');
-    val.className = 'font-size-val';
-    const showVal = () => { val.textContent = Math.round(f.size * 100) + '%'; };
-    showVal();
-    rng.addEventListener('input', () => {
-      settings.fonts[lang].size = Number(rng.value);
-      showVal();
-      applyFonts();
-    });
-    rng.addEventListener('change', saveSettings);
-    sizeLabel.append(rng, val);
-    group.appendChild(sizeLabel);
+    group.appendChild(makeSlider('Размер', f.size, 0.7, 2.4, 0.05,
+      v => Math.round(v * 100) + '%',
+      v => { settings.fonts[lang].size = v; applyFonts(); }));
+    group.appendChild(makeSlider('Интервал', f.line, 1.1, 2.6, 0.05,
+      v => v.toFixed(2),
+      v => { settings.fonts[lang].line = v; applyFonts(); }));
 
     wrap.appendChild(group);
   }
+
+  // общие поля колонки чтения
+  const mg = document.createElement('div');
+  mg.className = 'font-group';
+  const mh = document.createElement('div');
+  mh.className = 'font-lang';
+  mh.textContent = 'Поля страницы';
+  mg.appendChild(mh);
+  mg.appendChild(makeSlider('Ширина полей', settings.margin, 0.2, 3, 0.1,
+    v => v.toFixed(1) + ' rem',
+    v => { settings.margin = v; applyFonts(); }));
+  wrap.appendChild(mg);
+}
+
+// слайдер с живой подписью значения; onInput применяет, change сохраняет
+function makeSlider(caption, value, min, max, step, fmt, onInput) {
+  const label = document.createElement('label');
+  label.append(caption);
+  const rng = document.createElement('input');
+  rng.type = 'range';
+  rng.min = String(min);
+  rng.max = String(max);
+  rng.step = String(step);
+  rng.value = String(value);
+  const val = document.createElement('span');
+  val.className = 'font-size-val';
+  const show = () => { val.textContent = fmt(Number(rng.value)); };
+  show();
+  rng.addEventListener('input', () => { onInput(Number(rng.value)); show(); });
+  rng.addEventListener('change', saveSettings);
+  label.append(rng, val);
+  return label;
 }
 
 /* ===== настройки: панель ===== */
