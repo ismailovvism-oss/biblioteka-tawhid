@@ -247,6 +247,24 @@ body[data-layout="h"] .fn-label { flex-basis: 100%; }
 }
 .book-list .book-title { font-size: 1.05rem; }
 .book-list .book-sub { color: var(--muted); font-size: 0.95rem; }
+.book-list .book-note { color: var(--accent); font-size: 0.82rem; }
+
+.continue-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  width: 100%;
+  max-width: 46rem;
+  margin: 0.2rem auto 0.8rem;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--accent-soft);
+  border-inline-start: 3px solid var(--accent);
+  border-radius: 8px;
+  background: var(--active-bg);
+  text-align: start;
+}
+.continue-card .continue-cap { color: var(--accent); font-size: 0.8rem; letter-spacing: 0.02em; }
+.continue-card .continue-title { font-size: 1.05rem; }
 
 /* в библиотеке скрыты элементы режима чтения */
 body[data-view="library"] #btn-home,

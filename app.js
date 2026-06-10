@@ -15,7 +15,7 @@ const DEFAULTS = {
   debug: false,        // панель валидатора
   swap: false,         // менять местами оригинал/перевод в паре
   fonts: {},           // lang → { family, size(em) }
-  last: {},            // bookId → индекс последней главы
+  last: {},            // bookId → { chapter, sector, page, ts }
 };
 
 /* варианты шрифтов по направлению письма; значение option = font-family стек */
@@ -50,6 +50,16 @@ function saveSettings() {
 }
 
 const settings = loadSettings();
+
+/* позиция чтения по книге (со старого формата, где было просто число главы) */
+function getLast(id) {
+  const v = settings.last[id];
+  if (typeof v === 'number') return { chapter: v };
+  return v || null;
+}
+function setLast(id, data) {
+  settings.last[id] = Object.assign(getLast(id) || {}, data);
+}
 
 /* ===== состояние ===== */
 let library = [];         // авторский список книг (books/index.json)
@@ -117,7 +127,7 @@ async function loadChapter(i, targetSelector) {
   renderChapter();
   renderDebug();
   markTocCurrent();
-  settings.last[bookId] = i;
+  setLast(bookId, { chapter: i });
   saveSettings();
   if (targetSelector) {
     const el = stream.querySelector(targetSelector);
@@ -228,6 +238,16 @@ function updateActive() {
     if (activeEl) activeEl.classList.add('active');
   }
   updatePageIndicator();
+  rememberPosition();
+}
+
+/* позиция чтения сохраняется с задержкой — не дёргать localStorage на каждый кадр */
+let posSaveTick = null;
+function rememberPosition() {
+  if (!book || !activeEl) return;
+  setLast(bookId, { chapter: chapterIndex, sector: activeEl.dataset.id, page: currentPage(), ts: Date.now() });
+  if (posSaveTick) clearTimeout(posSaveTick);
+  posSaveTick = setTimeout(saveSettings, 500);
 }
 
 function currentPage() {
@@ -591,6 +611,30 @@ function renderLibrary() {
   document.title = 'Параллельная читалка';
   $('#chapter-title').textContent = library.length ? 'Библиотека' : 'Список книг пуст';
   stream.innerHTML = '';
+
+  const open = e => () => { history.pushState({}, '', '?book=' + encodeURIComponent(e.id)); openBook(e); };
+
+  // карточка «Продолжить» для самой недавно открытой книги
+  let recent = null;
+  for (const e of library) {
+    const l = getLast(e.id);
+    if (l && l.ts && (!recent || l.ts > recent.ts)) recent = { entry: e, ts: l.ts, page: l.page };
+  }
+  if (recent) {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'continue-card';
+    const cap = document.createElement('span');
+    cap.className = 'continue-cap';
+    cap.textContent = 'Продолжить чтение';
+    const t = document.createElement('span');
+    t.className = 'continue-title';
+    t.textContent = entryLabel(recent.entry) + (recent.page != null ? ` · стр. ${recent.page}` : '');
+    card.append(cap, t);
+    card.addEventListener('click', open(recent.entry));
+    stream.appendChild(card);
+  }
+
   const ul = document.createElement('ul');
   ul.className = 'book-list';
   for (const e of library) {
@@ -609,10 +653,14 @@ function renderLibrary() {
       sub.textContent = ar;
       btn.appendChild(sub);
     }
-    btn.addEventListener('click', () => {
-      history.pushState({}, '', '?book=' + encodeURIComponent(e.id));
-      openBook(e);
-    });
+    const l = getLast(e.id);
+    if (l && (l.page != null || l.sector)) {
+      const note = document.createElement('span');
+      note.className = 'book-note';
+      note.textContent = l.page != null ? `продолжить · стр. ${l.page}` : 'продолжить';
+      btn.appendChild(note);
+    }
+    btn.addEventListener('click', open(e));
     li.appendChild(btn);
     ul.appendChild(li);
   }
@@ -639,8 +687,10 @@ async function openBook(entry) {
   setupFontSettings();
   document.title = pickTitle(book.title);
   buildToc();
-  const last = Number.isInteger(settings.last[bookId]) ? settings.last[bookId] : 0;
-  await loadChapter(Math.min(Math.max(last, 0), book.chapters.length - 1));
+  const last = getLast(bookId);
+  const ci = last && Number.isInteger(last.chapter) ? last.chapter : 0;
+  const target = last && last.sector ? `.pair[data-id="${last.sector}"]` : null;
+  await loadChapter(Math.min(Math.max(ci, 0), book.chapters.length - 1), target);
 }
 
 /* маршрут по ?book=<id>: книга из списка — читаем, иначе — библиотека */
