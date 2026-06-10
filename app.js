@@ -30,14 +30,16 @@ function saveSettings() {
 const settings = loadSettings();
 
 /* ===== состояние ===== */
-const bookId = new URLSearchParams(location.search).get('book') || '_sample';
+let library = [];         // авторский список книг (books/index.json)
+let bookId = null;        // id выбранной книги
+let base = '';            // префикс путей книги: локальный путь или URL, с «/» на конце
 let book = null;          // манифест book.json
 let chapterIndex = 0;
 let pairs = [];           // модель текущей главы
 let warnings = [];
 let activeEl = null;      // DOM активной пары
 let fnJump = null;        // { originId, fn } для механики «скачок-возврат»
-const chapterCache = new Map(); // file → { pairs, warnings }
+const chapterCache = new Map(); // "<bookId>/<file>" → { pairs, warnings }
 
 const $ = s => document.querySelector(s);
 const stream = $('#stream');
@@ -49,16 +51,25 @@ async function fetchText(path) {
   return res.text();
 }
 
+function showLoadError(msg) {
+  stream.innerHTML = '';
+  const div = document.createElement('div');
+  div.className = 'load-error';
+  div.textContent = msg;
+  stream.appendChild(div);
+}
+
 async function loadChapterData(i) {
   const file = book.chapters[i].file;
-  if (!chapterCache.has(file)) {
+  const key = bookId + '/' + file;
+  if (!chapterCache.has(key)) {
     const texts = {};
     await Promise.all(book.languages.map(async lang => {
-      texts[lang] = await fetchText(`books/${bookId}/${lang}/${file}`);
+      texts[lang] = await fetchText(`${base}${lang}/${file}`);
     }));
-    chapterCache.set(file, buildChapter(texts, book.languages));
+    chapterCache.set(key, buildChapter(texts, book.languages));
   }
-  return chapterCache.get(file);
+  return chapterCache.get(key);
 }
 
 function pickTitle(t) {
@@ -75,11 +86,7 @@ async function loadChapter(i, targetSelector) {
     pairs = data.pairs;
     warnings = data.warnings;
   } catch (err) {
-    stream.innerHTML = '';
-    const div = document.createElement('div');
-    div.className = 'load-error';
-    div.textContent = 'Не удалось загрузить главу: ' + err.message;
-    stream.appendChild(div);
+    showLoadError('Не удалось загрузить главу: ' + err.message);
     $('#chapter-title').textContent = pickTitle(book.chapters[i].title);
     return;
   }
@@ -144,6 +151,13 @@ function renderChapter() {
     }
     buildMembers(pair, el);
     stream.appendChild(el);
+  }
+  if (!pairs.length) {
+    const note = document.createElement('div');
+    note.className = 'load-error';
+    note.textContent =
+      'Глава пуста: книга не размечена секторами Контракта (нет якорей <!-- sNNN -->). См. SPEC, раздел 3.';
+    stream.appendChild(note);
   }
   applyVisibility();
 }
@@ -345,7 +359,7 @@ function openScan() {
   const p = currentPage();
   if (p == null || !book.hasImages) return;
   const img = $('#img-scan');
-  img.src = `books/${bookId}/` + book.imagePattern.replace('{page}', p);
+  img.src = base + book.imagePattern.replace('{page}', p);
   img.classList.remove('zoom');
   $('#img-overlay').hidden = false;
 }
@@ -442,19 +456,56 @@ $('#page-form').addEventListener('submit', e => {
   if (n >= 1) gotoPage(n);
 });
 
-/* ===== старт ===== */
-async function init() {
-  applyTheme();
-  applyLayout();
-  bindSettings();
+/* ===== библиотека (авторский список книг) ===== */
+function entryLabel(e) {
+  return (e.title && (e.title.ru || e.title.ar)) || e.id;
+}
+
+function renderLibrary() {
+  document.body.dataset.view = 'library';
+  book = null;
+  document.title = 'Параллельная читалка';
+  $('#chapter-title').textContent = library.length ? 'Библиотека' : 'Список книг пуст';
+  stream.innerHTML = '';
+  const ul = document.createElement('ul');
+  ul.className = 'book-list';
+  for (const e of library) {
+    const li = document.createElement('li');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    const title = document.createElement('span');
+    title.className = 'book-title';
+    title.textContent = entryLabel(e);
+    btn.appendChild(title);
+    const ar = e.title && e.title.ar;
+    if (ar && ar !== entryLabel(e)) {
+      const sub = document.createElement('span');
+      sub.className = 'book-sub';
+      sub.dir = 'rtl';
+      sub.textContent = ar;
+      btn.appendChild(sub);
+    }
+    btn.addEventListener('click', () => {
+      history.pushState({}, '', '?book=' + encodeURIComponent(e.id));
+      openBook(e);
+    });
+    li.appendChild(btn);
+    ul.appendChild(li);
+  }
+  stream.appendChild(ul);
+  window.scrollTo(0, 0);
+}
+
+async function openBook(entry) {
+  bookId = entry.id;
+  base = entry.base.endsWith('/') ? entry.base : entry.base + '/';
+  chapterCache.clear();
+  document.body.dataset.view = 'reading';
+  $('#chapter-title').textContent = 'Загрузка…';
   try {
-    book = JSON.parse(await fetchText(`books/${bookId}/book.json`));
+    book = JSON.parse(await fetchText(base + 'book.json'));
   } catch (err) {
-    stream.innerHTML = '';
-    const div = document.createElement('div');
-    div.className = 'load-error';
-    div.textContent = `Не удалось загрузить книгу «${bookId}»: ${err.message}`;
-    stream.appendChild(div);
+    showLoadError(`Не удалось загрузить книгу «${entry.id}»: ${err.message}`);
     $('#chapter-title').textContent = 'Ошибка';
     return;
   }
@@ -463,6 +514,37 @@ async function init() {
   buildToc();
   const last = Number.isInteger(settings.last[bookId]) ? settings.last[bookId] : 0;
   await loadChapter(Math.min(Math.max(last, 0), book.chapters.length - 1));
+}
+
+/* маршрут по ?book=<id>: книга из списка — читаем, иначе — библиотека */
+function route() {
+  const wanted = new URLSearchParams(location.search).get('book');
+  const entry = wanted ? library.find(b => b.id === wanted) : null;
+  if (entry) openBook(entry);
+  else renderLibrary();
+}
+window.addEventListener('popstate', route);
+
+$('#btn-home').addEventListener('click', () => {
+  history.pushState({}, '', location.pathname);
+  renderLibrary();
+});
+
+/* ===== старт ===== */
+async function init() {
+  applyTheme();
+  applyLayout();
+  bindSettings();
+  try {
+    const idx = JSON.parse(await fetchText('books/index.json'));
+    library = Array.isArray(idx) ? idx : (idx.books || []);
+  } catch (err) {
+    document.body.dataset.view = 'library';
+    showLoadError('Не удалось загрузить список книг (books/index.json): ' + err.message);
+    $('#chapter-title').textContent = 'Ошибка';
+    return;
+  }
+  route();
 }
 
 init();

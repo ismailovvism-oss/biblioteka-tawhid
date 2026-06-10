@@ -218,6 +218,28 @@ body[data-layout="h"] .fn-label { flex-basis: 100%; }
   .overlay .sheet { max-width: 26rem; border-radius: 14px; }
 }
 
+/* ===== библиотека (стартовый экран) ===== */
+.book-list { margin: 0 auto; padding: 0; max-width: 46rem; list-style: none; }
+.book-list li { border-bottom: 1px solid var(--border); }
+.book-list button {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  width: 100%;
+  padding: 0.85rem 0.3rem;
+  text-align: start;
+}
+.book-list .book-title { font-size: 1.05rem; }
+.book-list .book-sub { color: var(--muted); font-size: 0.95rem; }
+
+/* в библиотеке скрыты элементы режима чтения */
+body[data-view="library"] #btn-home,
+body[data-view="library"] #btn-toc,
+body[data-view="library"] #btn-vis,
+body[data-view="library"] #btn-warn,
+body[data-view="library"] #bottombar { display: none !important; }
+body[data-view="library"] { padding-bottom: 1rem; }
+
 /* ===== переход к странице ===== */
 #page-popover {
   position: fixed;
