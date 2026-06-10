@@ -785,6 +785,31 @@ $('#page-form').addEventListener('submit', e => {
   if (n >= 1) gotoPage(n);
 });
 
+/* ===== клавиатура: стрелки — главы, Esc — закрыть ===== */
+function anyPopupOpen() {
+  return [...document.querySelectorAll('.overlay')].some(o => !o.hidden) ||
+    !$('#img-overlay').hidden || !$('#page-popover').hidden;
+}
+function closeTopPopup() {
+  if (!$('#img-overlay').hidden) { $('#img-overlay').hidden = true; return true; }
+  if (!$('#page-popover').hidden) { $('#page-popover').hidden = true; return true; }
+  let closed = false;
+  document.querySelectorAll('.overlay').forEach(ov => { if (!ov.hidden) { ov.hidden = true; closed = true; } });
+  return closed;
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { closeTopPopup(); return; }
+  const tag = (e.target.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (document.body.dataset.view !== 'reading' || !book || anyPopupOpen()) return;
+  if (e.key === 'ArrowRight') {
+    if (chapterIndex < book.chapters.length - 1) { loadChapter(chapterIndex + 1); e.preventDefault(); }
+  } else if (e.key === 'ArrowLeft') {
+    if (chapterIndex > 0) { loadChapter(chapterIndex - 1); e.preventDefault(); }
+  }
+});
+
 /* ===== поиск по книге ===== */
 // диакритика/татвиль арабского — убираем при поиске
 const AR_DIACRITICS = /[ؐ-ًؚ-ٰٟۖ-ۜ۟-۪ۨ-ۭـ]/;
