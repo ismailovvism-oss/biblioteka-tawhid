@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Параллельная читалка</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body data-theme="light" data-layout="v">
+
+<header id="topbar">
+  <button id="btn-toc" type="button" title="Оглавление">☰</button>
+  <div id="chapter-title">Загрузка…</div>
+  <button id="btn-warn" type="button" title="Ошибки контракта" hidden>⚠</button>
+  <button id="btn-vis" type="button" title="Видимость языков">⇅</button>
+  <button id="btn-settings" type="button" title="Настройки">⚙</button>
+</header>
+
+<main id="stream"></main>
+
+<footer id="bottombar">
+  <button id="btn-prev" type="button" title="Предыдущая глава">‹</button>
+  <button id="page-indicator" type="button" title="Перейти к странице">стр. —</button>
+  <button id="btn-scan" type="button" title="Показать скан страницы" hidden>скан</button>
+  <button id="btn-next" type="button" title="Следующая глава">›</button>
+</footer>
+
+<div id="page-popover" hidden>
+  <form id="page-form">
+    <input id="page-input" type="number" min="1" inputmode="numeric" placeholder="№ страницы">
+    <button type="submit">Перейти</button>
+  </form>
+</div>
+
+<div id="toc" class="overlay" hidden>
+  <div class="sheet">
+    <h2 id="toc-book-title"></h2>
+    <ul id="toc-list"></ul>
+  </div>
+</div>
+
+<div id="settings" class="overlay" hidden>
+  <div class="sheet">
+    <h2>Настройки</h2>
+    <label>Тема
+      <select id="set-theme">
+        <option value="light">светлая</option>
+        <option value="dark">тёмная</option>
+      </select>
+    </label>
+    <label>Раскладка пары
+      <select id="set-layout">
+        <option value="auto">по ориентации экрана</option>
+        <option value="v">вертикальная</option>
+        <option value="h">две колонки</option>
+      </select>
+    </label>
+    <label>Сноски
+      <select id="set-fnmode">
+        <option value="inline">разворот на месте</option>
+        <option value="jump">скачок и возврат</option>
+      </select>
+    </label>
+    <label class="row">Режим проверки (валидатор)
+      <input id="set-debug" type="checkbox">
+    </label>
+  </div>
+</div>
+
+<div id="debug-panel" hidden></div>
+
+<div id="img-overlay" hidden><img id="img-scan" alt="Скан страницы"></div>
+
+<script src="parser.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
