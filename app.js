@@ -206,6 +206,9 @@ function applyVisibility() {
   document.querySelectorAll('.member').forEach(m => {
     m.classList.toggle('lang-hidden', vis !== 'both' && m.getAttribute('lang') !== vis);
   });
+  // в одноязычном режиме можно «подсмотреть» второй язык тапом по паре
+  document.body.toggleAttribute('data-peek', vis !== 'both');
+  if (vis === 'both') stream.querySelectorAll('.pair.peek').forEach(p => p.classList.remove('peek'));
   $('#btn-vis').textContent =
     vis === 'both' ? displayLangs().map(l => l.toUpperCase()).join('+') : vis.toUpperCase();
 }
@@ -286,7 +289,12 @@ stream.addEventListener('click', e => {
     return;
   }
   const back = e.target.closest('.fn-back');
-  if (back) returnFromFn(back);
+  if (back) { returnFromFn(back); return; }
+  // одноязычный режим: тап по паре раскрывает/прячет второй язык
+  if (settings.visibility !== 'both' && !window.getSelection().toString()) {
+    const pairEl = e.target.closest('.pair');
+    if (pairEl) pairEl.classList.toggle('peek');
+  }
 });
 
 function toggleInlineFn(afterEl, n) {

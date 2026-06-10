@@ -112,6 +112,11 @@ button:active { background: var(--accent-soft); }
 }
 .member.lang-hidden { display: none; }
 
+/* «подсмотреть» второй язык: тап по паре в одноязычном режиме */
+body[data-peek] .pair { cursor: pointer; }
+.pair.peek .member.lang-hidden { display: block; opacity: 0.72; }
+body[data-layout="h"] .pair.peek .member.lang-hidden { display: block; }
+
 /* две колонки (альбом/планшет или ручной тумблер) */
 body[data-layout="h"] .pair {
   display: flex;
