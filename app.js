@@ -139,6 +139,7 @@ async function loadChapter(i, targetSelector) {
   } else {
     window.scrollTo(0, 0);
   }
+  applyPendingHit();
   updateActive();
 }
 
@@ -873,6 +874,58 @@ const htmlToText = (() => {
 })();
 
 let searchSeq = 0;
+let pendingHit = null; // { ci, id, lang, start, end } — подсветить после перехода
+
+function jumpToHit(r) {
+  $('#search').hidden = true;
+  pendingHit = r;
+  if (r.ci === chapterIndex) applyPendingHit();
+  else loadChapter(r.ci, `.pair[data-id="${r.id}"]`);
+}
+
+// подсветить найденный фрагмент в нужном члене пары; раскрыть язык, если скрыт
+function applyPendingHit() {
+  const r = pendingHit;
+  pendingHit = null;
+  stream.querySelectorAll('mark.search-hit').forEach(unwrap);
+  if (!r || r.ci !== chapterIndex) return;
+  const pairEl = stream.querySelector(`.pair[data-id="${r.id}"]`);
+  if (!pairEl) return;
+  if (settings.visibility !== 'both' && settings.visibility !== r.lang) pairEl.classList.add('peek');
+  const member = pairEl.querySelector(`.member.lang-${r.lang}`);
+  if (member) highlightRange(member, r.start, r.end);
+  pairEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  flash(pairEl);
+}
+
+function unwrap(el) {
+  const parent = el.parentNode;
+  while (el.firstChild) parent.insertBefore(el.firstChild, el);
+  parent.removeChild(el);
+  parent.normalize();
+}
+
+// обернуть текстовый диапазон [start,end) (по textContent) в <mark>
+function highlightRange(root, start, end) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let pos = 0, startNode = null, startOff = 0, endNode = null, endOff = 0, n;
+  while ((n = walker.nextNode())) {
+    const len = n.nodeValue.length;
+    if (startNode === null && pos + len > start) { startNode = n; startOff = start - pos; }
+    if (pos + len >= end) { endNode = n; endOff = end - pos; break; }
+    pos += len;
+  }
+  if (!startNode || !endNode) return;
+  try {
+    const range = document.createRange();
+    range.setStart(startNode, startOff);
+    range.setEnd(endNode, endOff);
+    const mark = document.createElement('mark');
+    mark.className = 'search-hit';
+    range.surroundContents(mark); // бросает, если диапазон пересекает границы элементов
+  } catch { /* совпадение пересекает разметку (напр. сноску) — обойдёмся вспышкой пары */ }
+}
+
 async function runSearch(raw) {
   const q = normalize(raw).trim();
   const box = $('#search-results');
@@ -932,16 +985,7 @@ function renderResults(results, label) {
     snip.append(mark, r.text.slice(r.end, to) + (to < r.text.length ? '…' : ''));
     item.appendChild(snip);
 
-    item.addEventListener('click', () => {
-      $('#search').hidden = true;
-      const target = `.pair[data-id="${r.id}"]`;
-      if (r.ci === chapterIndex) {
-        const el = stream.querySelector(target);
-        if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); flash(el); }
-      } else {
-        loadChapter(r.ci, target);
-      }
-    });
+    item.addEventListener('click', () => jumpToHit(r));
     box.appendChild(item);
   }
 }
