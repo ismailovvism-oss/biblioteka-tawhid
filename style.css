@@ -264,7 +264,17 @@ body[data-layout="h"][data-colrtl] .pair > .member[dir="rtl"] {
   border-radius: 6px;
   color: var(--accent);
 }
-.link-btn { margin-top: 0.6rem; padding: 0.4rem 0; color: var(--accent); }
+.link-btn { display: block; margin-top: 0.6rem; padding: 0.4rem 0; color: var(--accent); text-align: start; }
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.55rem 0.1rem;
+  border-bottom: 1px solid var(--border);
+}
+.stat-row b { font-size: 1.05rem; }
+.stat-note { margin: 0.9rem 0 0; color: var(--muted); font-size: 0.9rem; }
 
 .sheet.help h3 { margin-top: 1rem; }
 .sheet.help ul { margin: 0.3rem 0; padding-inline-start: 1.2rem; }
@@ -299,11 +309,15 @@ body[data-layout="h"][data-colrtl] .pair > .member[dir="rtl"] {
 #toc-list li { border-bottom: 1px solid var(--border); }
 #toc-list li.current button { color: var(--accent); font-weight: bold; }
 #toc-list button {
-  display: block;
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
   width: 100%;
   padding: 0.6rem 0.2rem;
   text-align: start;
 }
+#toc-list .toc-title { flex: 1; min-width: 0; }
+#toc-list .toc-pages { flex: none; color: var(--muted); font-size: 0.8rem; white-space: nowrap; }
 
 @media (min-width: 600px) {
   .overlay { align-items: center; justify-content: center; }

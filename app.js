@@ -22,6 +22,7 @@ const DEFAULTS = {
   highlights: {},      // bookId → [ { chapter, id, lang, start, end, ts } ]
   last: {},            // bookId → { chapter, sector, page, ts }
   bookmarks: {},       // bookId → [ { id, chapter, page, note, ts } ]
+  readDays: [],        // ['YYYY-MM-DD', …] — дни, когда что-то читали
 };
 
 /* варианты шрифтов по направлению письма; значение option = font-family стек */
@@ -149,6 +150,7 @@ async function loadChapter(i, targetId) {
   renderDebug();
   markTocCurrent();
   setLast(bookId, { chapter: i });
+  recordReadDay();
   saveSettings();
   if (targetId) scrollToPair(targetId, false);
   else window.scrollTo(0, 0);
@@ -399,19 +401,43 @@ function flash(el) {
 }
 
 /* ===== навигация: оглавление, главы, страницы ===== */
+let tocRangesFilled = false;
 function buildToc() {
   $('#toc-book-title').textContent = pickTitle(book.title);
   const ul = $('#toc-list');
   ul.innerHTML = '';
+  tocRangesFilled = false;
   book.chapters.forEach((ch, i) => {
     const li = document.createElement('li');
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.textContent = pickTitle(ch.title);
+    const title = document.createElement('span');
+    title.className = 'toc-title';
+    title.textContent = pickTitle(ch.title);
+    const pages = document.createElement('span');
+    pages.className = 'toc-pages';
+    btn.append(title, pages);
     btn.addEventListener('click', () => { $('#toc').hidden = true; loadChapter(i); });
     li.appendChild(btn);
     ul.appendChild(li);
   });
+}
+
+// диапазоны страниц по главам считаем лениво (грузим главы фоном при первом открытии TOC)
+async function fillPageRanges() {
+  if (tocRangesFilled || !book) return;
+  tocRangesFilled = true;
+  const myBook = bookId;
+  const items = $('#toc-list').querySelectorAll('.toc-pages');
+  for (let i = 0; i < book.chapters.length; i++) {
+    let data;
+    try { data = await loadChapterData(i); } catch { continue; }
+    if (myBook !== bookId) { tocRangesFilled = false; return; } // книгу сменили
+    const ps = data.pairs.map(p => p.page).filter(p => p != null);
+    if (!ps.length || !items[i]) continue;
+    const a = Math.min(...ps), b = Math.max(...ps);
+    items[i].textContent = a === b ? `стр. ${a}` : `стр. ${a}–${b}`;
+  }
 }
 
 function markTocCurrent() {
@@ -932,6 +958,63 @@ function importSettings(file) {
 
 $('#btn-help').addEventListener('click', () => { $('#settings').hidden = true; $('#help').hidden = false; });
 
+/* ===== статистика чтения ===== */
+function localDay(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function recordReadDay() {
+  const today = localDay(new Date());
+  if (!settings.readDays.includes(today)) settings.readDays.push(today);
+}
+function readingStreak() {
+  const set = new Set(settings.readDays || []);
+  const d = new Date();
+  if (!set.has(localDay(d))) d.setDate(d.getDate() - 1); // сегодня ещё не читал — считаем от вчера
+  let s = 0;
+  while (set.has(localDay(d))) { s++; d.setDate(d.getDate() - 1); }
+  return s;
+}
+function sumOver(map) {
+  return Object.values(map || {}).reduce((n, arr) => n + (Array.isArray(arr) ? arr.length : 0), 0);
+}
+function plural(n, one, few, many) {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return one;
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+  return many;
+}
+
+function buildStats() {
+  const rows = [
+    ['Дней подряд', `${readingStreak()}`],
+    ['Дней с чтением', `${(settings.readDays || []).length}`],
+    ['Книг начато', `${library.filter(e => getLast(e.id)).length} из ${library.length}`],
+    ['Закладок', `${sumOver(settings.bookmarks)}`],
+    ['Выделений', `${sumOver(settings.highlights)}`],
+  ];
+  const box = $('#stats-body');
+  box.innerHTML = '';
+  for (const [k, v] of rows) {
+    const row = document.createElement('div');
+    row.className = 'stat-row';
+    const key = document.createElement('span');
+    key.textContent = k;
+    const val = document.createElement('b');
+    val.textContent = v;
+    row.append(key, val);
+    box.appendChild(row);
+  }
+  const streak = readingStreak();
+  const note = document.createElement('p');
+  note.className = 'stat-note';
+  note.textContent = streak > 0
+    ? `${streak} ${plural(streak, 'день', 'дня', 'дней')} подряд — так держать!`
+    : 'Почитайте сегодня, чтобы начать серию.';
+  box.appendChild(note);
+}
+
+$('#btn-stats').addEventListener('click', () => { $('#settings').hidden = true; buildStats(); $('#stats').hidden = false; });
+
 $('#set-export').addEventListener('click', exportSettings);
 $('#set-import-btn').addEventListener('click', () => $('#set-import').click());
 $('#set-import').addEventListener('change', e => {
@@ -941,7 +1024,7 @@ $('#set-import').addEventListener('change', e => {
 });
 
 /* ===== прочие обработчики ===== */
-$('#btn-toc').addEventListener('click', () => { $('#toc').hidden = false; });
+$('#btn-toc').addEventListener('click', () => { $('#toc').hidden = false; fillPageRanges(); });
 $('#btn-settings').addEventListener('click', () => { $('#settings').hidden = false; });
 document.querySelectorAll('.overlay').forEach(ov => {
   ov.addEventListener('click', e => { if (e.target === ov) ov.hidden = true; });
