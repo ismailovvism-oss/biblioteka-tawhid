@@ -255,6 +255,14 @@ body[data-layout="h"][data-colrtl] .pair > .member[dir="rtl"] {
   margin: 0.7rem 0;
 }
 .sheet select { font: inherit; padding: 0.2rem; max-width: 55%; }
+.backup-row { display: flex; gap: 0.5rem; margin: 0.9rem 0; }
+.backup-row button {
+  flex: 1;
+  padding: 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--accent);
+}
 .sheet input[type="range"] { flex: 1; max-width: 55%; accent-color: var(--accent); }
 
 /* ===== настройки шрифтов (на каждый язык) ===== */

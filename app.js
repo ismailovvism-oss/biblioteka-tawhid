@@ -761,17 +761,21 @@ function makeSlider(caption, value, min, max, step, fmt, onInput) {
 }
 
 /* ===== настройки: панель ===== */
+function syncSettingControls() {
+  $('#set-theme').value = settings.theme;
+  $('#set-layout').value = settings.layout;
+  $('#set-fnmode').value = settings.fnMode;
+  $('#set-order').value = settings.swap ? '1' : '0';
+  $('#set-debug').checked = settings.debug;
+}
+
 function bindSettings() {
   const theme = $('#set-theme');
   const layout = $('#set-layout');
   const fnmode = $('#set-fnmode');
   const order = $('#set-order');
   const debug = $('#set-debug');
-  theme.value = settings.theme;
-  layout.value = settings.layout;
-  fnmode.value = settings.fnMode;
-  order.value = settings.swap ? '1' : '0';
-  debug.checked = settings.debug;
+  syncSettingControls();
   theme.addEventListener('change', () => { settings.theme = theme.value; saveSettings(); applyTheme(); });
   layout.addEventListener('change', () => { settings.layout = layout.value; saveSettings(); applyLayout(); updateActive(); });
   fnmode.addEventListener('change', () => { settings.fnMode = fnmode.value; saveSettings(); });
@@ -782,6 +786,50 @@ function bindSettings() {
   });
   debug.addEventListener('change', () => { settings.debug = debug.checked; saveSettings(); renderDebug(); });
 }
+
+/* ===== резервная копия настроек и закладок ===== */
+function exportSettings() {
+  const blob = new Blob([JSON.stringify(settings, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const stamp = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `chitalka-backup-${stamp}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function importSettings(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    let data;
+    try { data = JSON.parse(reader.result); } catch { toast('Не удалось прочитать файл'); return; }
+    if (!data || typeof data !== 'object') { toast('Файл не похож на резервную копию'); return; }
+    Object.assign(settings, data);
+    saveSettings();
+    applyTheme();
+    applyLayout();
+    syncSettingControls();
+    if (book) {
+      ensureFontDefaults();
+      applyFonts();
+      setupFontSettings();
+      buildBookmarks();
+      renderChapter();
+      updateActive();
+    }
+    toast('Импортировано');
+  };
+  reader.readAsText(file);
+}
+
+$('#set-export').addEventListener('click', exportSettings);
+$('#set-import-btn').addEventListener('click', () => $('#set-import').click());
+$('#set-import').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (file) importSettings(file);
+  e.target.value = '';
+});
 
 /* ===== прочие обработчики ===== */
 $('#btn-toc').addEventListener('click', () => { $('#toc').hidden = false; });
