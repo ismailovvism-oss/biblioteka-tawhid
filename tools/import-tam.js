@@ -215,7 +215,7 @@ function main() {
   const book = {
     bookId: BOOK_ID, title: BOOK_TITLE, languages: ['ar', 'ru'], rtl: ['ar'], chapters,
     hasImages: true, imagePattern: 'img/p{page}.jpg',
-    feedbackEmail: 'ismailoffism@gmail.com', // кнопка «✉ Ошибка?» в читалке
+    feedbackEmail: 'qaadiy@gmail.com', // кнопка «✉ Ошибка?» в читалке
   };
   fs.writeFileSync(path.join(OUT, 'book.json'), JSON.stringify(book, null, 2) + '\n');
 
