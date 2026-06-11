@@ -111,3 +111,19 @@ node tools/validate.js books/_sample
 3. Прогнать валидатор: `node tools/validate.js books/<bookId>` (для локальных).
 4. Добавить запись в `books/index.json`.
 5. Открыть `?book=<bookId>` или выбрать книгу в библиотеке.
+
+### Импорт «Тауфик аль-Маннан» из переводческого проекта
+
+Книга `tawfiq` собирается из репозитория `tawfiq-al-mannan` (формат «Вычитки»:
+`source/` арабский + `translation/` русский, секторы = абзацы по пустой строке,
+спарены по порядку). Конвертер переносит её в Контракт читалки:
+
+```
+git clone https://github.com/ismailovvism-oss/tawfiq-al-mannan.git /tmp/tam-book
+node tools/import-tam.js /tmp/tam-book      # → books/tawfiq/{ar,ru}/ + book.json + index.json
+node tools/validate.js books/tawfiq
+```
+
+Арабский выдаётся только для глав с точным посекторным паритетом; где он ещё не
+сведён в Вычитке — глава пока читается по-русски, а валидатор пишет об этом одной
+строкой. После правки паритета и `git push` в проекте перевода — повторить импорт.

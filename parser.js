@@ -130,23 +130,31 @@ function buildChapter(texts, langs) {
     pos.set(id, order.length);
     order.push(id);
   }
-  let insertAt = 0;
-  for (const id of maps[trans].keys()) {
-    if (pos.has(id)) {
-      insertAt = pos.get(id) + 1;
-      continue;
+  if (trans && maps[trans]) {
+    let insertAt = 0;
+    for (const id of maps[trans].keys()) {
+      if (pos.has(id)) {
+        insertAt = pos.get(id) + 1;
+        continue;
+      }
+      order.splice(insertAt, 0, id);
+      for (const [k, v] of pos) if (v >= insertAt) pos.set(k, v + 1);
+      pos.set(id, insertAt);
+      insertAt++;
     }
-    order.splice(insertAt, 0, id);
-    for (const [k, v] of pos) if (v >= insertAt) pos.set(k, v + 1);
-    pos.set(id, insertAt);
-    insertAt++;
   }
+
+  // если глава целиком односторонняя (один язык не содержит ни одного текст-сектора),
+  // это не рассинхрон, а ещё не подключённый язык — не сорим пер-секторными варнингами
+  const textCount = lang => [...(maps[lang]?.values() || [])].filter(g => g.type === 'text').length;
+  const oneSided = trans && maps[trans] && (textCount(orig) === 0 || textCount(trans) === 0)
+    && (textCount(orig) > 0 || textCount(trans) > 0);
 
   // пары
   const pairs = [];
   for (const baseId of order) {
     const o = maps[orig].get(baseId) || null;
-    const t = maps[trans].get(baseId) || null;
+    const t = (trans && maps[trans]) ? maps[trans].get(baseId) || null : null;
     const any = o || t;
     const pair = {
       id: baseId,
@@ -155,18 +163,24 @@ function buildChapter(texts, langs) {
       refs: [...new Set([...(o ? o.refs : []), ...(t ? t.refs : [])])],
     };
     pair[orig] = o ? renderGroup(o) : null;
-    pair[trans] = t ? renderGroup(t) : null;
+    if (trans) pair[trans] = t ? renderGroup(t) : null;
     pairs.push(pair);
 
-    // валидатор: рассинхрон id
-    const label = any.type === 'footnote' ? 'сноска' : 'сектор';
-    if (o && !t) warnings.push(`${label} ${baseId}: есть в ${orig}, нет пары в ${trans}`);
-    if (t && !o) {
-      warnings.push(
-        `${label} ${baseId}: есть в ${trans}, нет пары в ${orig}` +
-          (any.type === 'text' ? ' (страница неизвестна)' : '')
-      );
+    // валидатор: рассинхрон id (только для двуязычной, не односторонней главы)
+    if (trans && !oneSided) {
+      const label = any.type === 'footnote' ? 'сноска' : 'сектор';
+      if (o && !t) warnings.push(`${label} ${baseId}: есть в ${orig}, нет пары в ${trans}`);
+      if (t && !o) {
+        warnings.push(
+          `${label} ${baseId}: есть в ${trans}, нет пары в ${orig}` +
+            (any.type === 'text' ? ' (страница неизвестна)' : '')
+        );
+      }
     }
+  }
+  if (oneSided) {
+    const present = textCount(orig) > 0 ? orig : trans;
+    warnings.push(`глава целиком только в ${present} — второй язык ещё не подключён`);
   }
 
   // валидатор: сноски — ссылки без определений и висячие определения (по каждому языку)
