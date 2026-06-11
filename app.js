@@ -192,9 +192,11 @@ function renderChapter() {
     }
     const el = document.createElement('article');
     el.className = 'pair' + (pair.type === 'footnote' ? ' is-footnote' : '');
-    el.dataset.id = pair.id;
+    el.dataset.id = pair.id + (pair.lang ? '@' + pair.lang : ''); // сноски пер-язычные → id уникален
     if (pair.page != null) el.dataset.page = pair.page;
     if (pair.type === 'footnote') {
+      el.dataset.fn = pair.id.slice(2);
+      if (pair.lang) el.dataset.fnlang = pair.lang;
       const label = document.createElement('div');
       label.className = 'fn-label';
       const num = document.createElement('span');
@@ -228,6 +230,10 @@ function applyVisibility() {
   const vis = settings.visibility;
   document.querySelectorAll('.member').forEach(m => {
     m.classList.toggle('lang-hidden', vis !== 'both' && m.getAttribute('lang') !== vis);
+  });
+  // сноски пер-язычные: целиком прячем сноску языка, который сейчас скрыт
+  document.querySelectorAll('.pair.is-footnote[data-fnlang]').forEach(p => {
+    p.classList.toggle('fn-hidden', vis !== 'both' && p.dataset.fnlang !== vis);
   });
   // в одноязычном режиме можно «подсмотреть» второй язык тапом по паре
   document.body.toggleAttribute('data-peek', vis !== 'both');
@@ -324,8 +330,9 @@ stream.addEventListener('click', e => {
   const ref = e.target.closest('.fnref');
   if (ref) {
     const block = ref.closest('.pair, .fn-inline');
-    if (settings.fnMode === 'jump') jumpToFn(block, ref.dataset.fn);
-    else toggleInlineFn(block, ref.dataset.fn);
+    const lang = ref.closest('.member')?.getAttribute('lang') || displayLangs()[0];
+    if (settings.fnMode === 'jump') jumpToFn(block, ref.dataset.fn, lang);
+    else toggleInlineFn(block, ref.dataset.fn, lang);
     return;
   }
   const back = e.target.closest('.fn-back');
@@ -339,17 +346,18 @@ stream.addEventListener('click', e => {
   }
 });
 
-function toggleInlineFn(afterEl, n) {
+function toggleInlineFn(afterEl, n, lang) {
   // повторный тап — свернуть
   let sib = afterEl.nextElementSibling;
   while (sib && sib.classList.contains('fn-inline')) {
-    if (sib.dataset.fn === n) { sib.remove(); return; }
+    if (sib.dataset.fn === n && sib.dataset.fnlang === lang) { sib.remove(); return; }
     sib = sib.nextElementSibling;
   }
-  const fnPair = pairs.find(p => p.id === 'fn' + n);
+  const fnPair = pairs.find(p => p.type === 'footnote' && p.id === 'fn' + n && p.lang === lang);
   const box = document.createElement('aside');
   box.className = 'fn-inline';
   box.dataset.fn = n;
+  box.dataset.fnlang = lang;
   if (!fnPair) {
     const div = document.createElement('div');
     div.className = 'fn-missing';
@@ -370,9 +378,10 @@ function toggleInlineFn(afterEl, n) {
   applyVisibility();
 }
 
-function jumpToFn(originBlock, n) {
-  const target = pairById('fn' + n);
-  if (!target) { toggleInlineFn(originBlock, n); return; } // битая ссылка — покажем сообщение
+function jumpToFn(originBlock, n, lang) {
+  const target = stream.querySelector(`.pair.is-footnote[data-fn="${n}"][data-fnlang="${lang}"]`)
+    || stream.querySelector(`.pair.is-footnote[data-fn="${n}"]`);
+  if (!target) { toggleInlineFn(originBlock, n, lang); return; } // битая ссылка — покажем сообщение
   const originPair = findPairElBack(originBlock);
   fnJump = { originId: originPair ? originPair.dataset.id : null, fn: n };
   stream.querySelectorAll('.fn-back').forEach(b => { b.hidden = true; });
@@ -1135,8 +1144,9 @@ function applyPendingHit() {
   pendingHit = null;
   stream.querySelectorAll('mark.search-hit').forEach(unwrap);
   if (!r || r.ci !== chapterIndex) return;
-  const pairEl = pairById(r.id);
+  const pairEl = pairById(r.id + '@' + r.lang) || pairById(r.id); // сноски пер-язычные → id@lang
   if (!pairEl) return;
+  pairEl.classList.remove('fn-hidden'); // если это сноска скрытого языка — раскроем под подсветку
   if (settings.visibility !== 'both' && settings.visibility !== r.lang) pairEl.classList.add('peek');
   const member = pairEl.querySelector(`.member.lang-${r.lang}`);
   if (member) highlightRange(member, r.start, r.end);

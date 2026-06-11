@@ -123,20 +123,16 @@ function buildChapter(texts, langs) {
     maps[lang] = map;
   }
 
-  // порядок: как в оригинале; сектора только-перевода — после своего соседа
+  // ── текстовые сектора: пары как в оригинале; только-перевод — после соседа ──
+  const isText = (lang, id) => maps[lang].get(id)?.type === 'text';
   const order = [];
   const pos = new Map();
-  for (const id of maps[orig].keys()) {
-    pos.set(id, order.length);
-    order.push(id);
-  }
+  for (const id of maps[orig].keys()) if (isText(orig, id)) { pos.set(id, order.length); order.push(id); }
   if (trans && maps[trans]) {
     let insertAt = 0;
     for (const id of maps[trans].keys()) {
-      if (pos.has(id)) {
-        insertAt = pos.get(id) + 1;
-        continue;
-      }
+      if (!isText(trans, id)) continue;
+      if (pos.has(id)) { insertAt = pos.get(id) + 1; continue; }
       order.splice(insertAt, 0, id);
       for (const [k, v] of pos) if (v >= insertAt) pos.set(k, v + 1);
       pos.set(id, insertAt);
@@ -150,37 +146,40 @@ function buildChapter(texts, langs) {
   const oneSided = trans && maps[trans] && (textCount(orig) === 0 || textCount(trans) === 0)
     && (textCount(orig) > 0 || textCount(trans) > 0);
 
-  // пары
   const pairs = [];
   for (const baseId of order) {
     const o = maps[orig].get(baseId) || null;
     const t = (trans && maps[trans]) ? maps[trans].get(baseId) || null : null;
-    const any = o || t;
     const pair = {
       id: baseId,
       page: o ? o.page : null, // страница — только из оригинала, протягивается по id
-      type: any.type,
+      type: 'text',
       refs: [...new Set([...(o ? o.refs : []), ...(t ? t.refs : [])])],
     };
     pair[orig] = o ? renderGroup(o) : null;
     if (trans) pair[trans] = t ? renderGroup(t) : null;
     pairs.push(pair);
 
-    // валидатор: рассинхрон id (только для двуязычной, не односторонней главы)
+    // валидатор: рассинхрон секторов (только для двуязычной, не односторонней главы)
     if (trans && !oneSided) {
-      const label = any.type === 'footnote' ? 'сноска' : 'сектор';
-      if (o && !t) warnings.push(`${label} ${baseId}: есть в ${orig}, нет пары в ${trans}`);
-      if (t && !o) {
-        warnings.push(
-          `${label} ${baseId}: есть в ${trans}, нет пары в ${orig}` +
-            (any.type === 'text' ? ' (страница неизвестна)' : '')
-        );
-      }
+      if (o && !t) warnings.push(`сектор ${baseId}: есть в ${orig}, нет пары в ${trans}`);
+      if (t && !o) warnings.push(`сектор ${baseId}: есть в ${trans}, нет пары в ${orig} (страница неизвестна)`);
     }
   }
   if (oneSided) {
     const present = textCount(orig) > 0 ? orig : trans;
     warnings.push(`глава целиком только в ${present} — второй язык ещё не подключён`);
+  }
+
+  // ── сноски: пер-язычные, без кросс-спаривания. Авторские (цитаты, в ar) и
+  //    переводческие (пояснения терминов, только в ru) — разной природы и числа;
+  //    каждый язык несёт свои, ссылка [^N] ведёт к сноске того же языка ──
+  for (const lang of langs) {
+    if (!maps[lang]) continue;
+    for (const g of maps[lang].values()) {
+      if (g.type !== 'footnote') continue;
+      pairs.push({ id: g.baseId, lang, type: 'footnote', page: null, refs: g.refs, [lang]: renderGroup(g) });
+    }
   }
 
   // валидатор: сноски — ссылки без определений и висячие определения (по каждому языку)
