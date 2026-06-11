@@ -9,7 +9,7 @@
 const SETTINGS_KEY = 'chitalka:settings';
 const DEFAULTS = {
   theme: 'light',      // light | dark
-  visibility: 'both',  // both | <lang>
+  visibility: 'both',  // both | <lang> | quiz (самопроверка: оригинал + перевод по тапу)
   layout: 'auto',      // auto | v | h
   fnMode: 'inline',    // inline | jump
   align: 'start',      // start | justify — выравнивание текста
@@ -224,10 +224,16 @@ function renderChapter() {
   applyHighlights();
 }
 
-/* ===== видимость языков: both → <orig> → <trans> ===== */
+/* ===== видимость языков: both → <orig> → <trans> → quiz (самопроверка) ===== */
+// фактически показанный язык: в самопроверке виден только оригинал
+function visibleLang() {
+  return settings.visibility === 'quiz' ? book.languages[0] : settings.visibility;
+}
+
 function applyVisibility() {
   if (!book) return;
-  const vis = settings.visibility;
+  const quiz = settings.visibility === 'quiz';
+  const vis = visibleLang();
   document.querySelectorAll('.member').forEach(m => {
     m.classList.toggle('lang-hidden', vis !== 'both' && m.getAttribute('lang') !== vis);
   });
@@ -235,10 +241,13 @@ function applyVisibility() {
   document.querySelectorAll('.pair.is-footnote[data-fnlang]').forEach(p => {
     p.classList.toggle('fn-hidden', vis !== 'both' && p.dataset.fnlang !== vis);
   });
-  // в одноязычном режиме можно «подсмотреть» второй язык тапом по паре
+  // в одноязычном режиме можно «подсмотреть» второй язык тапом по паре;
+  // самопроверка — то же, но скрытый перевод обозначен заглушкой (CSS по data-quiz)
   document.body.toggleAttribute('data-peek', vis !== 'both');
+  document.body.toggleAttribute('data-quiz', quiz);
   if (vis === 'both') clearPeeks();
   $('#btn-vis').textContent =
+    quiz ? book.languages[0].toUpperCase() + '+?' :
     vis === 'both' ? displayLangs().map(l => l.toUpperCase()).join('+') : vis.toUpperCase();
 }
 
@@ -247,7 +256,8 @@ function clearPeeks() {
 }
 
 function cycleVisibility() {
-  const order = ['both', ...book.languages];
+  // самопроверка есть только у двуязычных книг (нужен перевод, который скрываем)
+  const order = book.languages.length > 1 ? ['both', ...book.languages, 'quiz'] : ['both', ...book.languages];
   const cur = order.indexOf(settings.visibility);
   settings.visibility = order[(cur + 1) % order.length];
   saveSettings();
@@ -952,7 +962,7 @@ function importSettings(file) {
     syncSettingControls();
     if (book) {
       // видимость из бэкапа могла быть с языком другой книги — иначе глава станет пустой
-      if (!['both', ...book.languages].includes(settings.visibility)) settings.visibility = 'both';
+      if (!['both', ...book.languages, ...(book.languages.length > 1 ? ['quiz'] : [])].includes(settings.visibility)) settings.visibility = 'both';
       ensureFontDefaults();
       applyFonts();
       setupFontSettings();
@@ -1147,7 +1157,8 @@ function applyPendingHit() {
   const pairEl = pairById(r.id + '@' + r.lang) || pairById(r.id); // сноски пер-язычные → id@lang
   if (!pairEl) return;
   pairEl.classList.remove('fn-hidden'); // если это сноска скрытого языка — раскроем под подсветку
-  if (settings.visibility !== 'both' && settings.visibility !== r.lang) pairEl.classList.add('peek');
+  const vl = visibleLang();
+  if (vl !== 'both' && vl !== r.lang) pairEl.classList.add('peek');
   const member = pairEl.querySelector(`.member.lang-${r.lang}`);
   if (member) highlightRange(member, r.start, r.end);
   pairEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1356,7 +1367,7 @@ async function openBook(entry, opts = {}) {
   }
   if (!Array.isArray(book.rtl)) book.rtl = [];
   if (!book.title) book.title = { [book.languages[0]]: entry.id };
-  if (!['both', ...book.languages].includes(settings.visibility)) settings.visibility = 'both';
+  if (!['both', ...book.languages, ...(book.languages.length > 1 ? ['quiz'] : [])].includes(settings.visibility)) settings.visibility = 'both';
   ensureFontDefaults();
   applyFonts();
   setupFontSettings();

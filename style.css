@@ -159,6 +159,16 @@ body[data-align="justify"] .member p { text-align: justify; }
 body[data-peek] .pair { cursor: pointer; }
 .pair.peek .member.lang-hidden { display: block; opacity: 0.72; }
 
+/* самопроверка: скрытый перевод обозначен заглушкой, тап по паре раскрывает/прячет */
+body[data-quiz] .pair:not(.peek):not(.is-footnote):has(> .member.lang-hidden)::after {
+  content: '· · · перевод · · ·';
+  display: block;
+  text-align: center;
+  font-size: 0.78em;
+  opacity: 0.4;
+  padding: 0.05rem 0 0.15rem;
+}
+
 /* две колонки (альбом/планшет или ручной тумблер) */
 body[data-layout="h"] .pair {
   display: flex;
