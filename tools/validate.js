@@ -18,7 +18,7 @@ if (!dir) {
 }
 
 const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'book.json'), 'utf8'));
-console.log(`Книга: ${manifest.bookId} — ${manifest.title[manifest.languages[1]] || ''}`);
+console.log(`Книга: ${manifest.bookId} — ${manifest.title[manifest.languages[1]] || manifest.title[manifest.languages[0]] || ''}`);
 
 let total = 0;
 for (const ch of manifest.chapters) {

@@ -1,0 +1,11 @@
+{
+  "bookId": "_sample-en",
+  "title": { "en": "English Sample Book" },
+  "languages": ["en"],
+  "rtl": [],
+  "chapters": [
+    { "file": "01.md", "title": { "en": "On Reading" } },
+    { "file": "02.md", "title": { "en": "On Note-Taking" } }
+  ],
+  "hasImages": false
+}

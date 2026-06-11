@@ -1262,7 +1262,11 @@ $('#search-form').addEventListener('submit', e => {
 
 /* ===== библиотека (авторский список книг) ===== */
 function entryLabel(e) {
-  return (e.title && (e.title.ru || e.title.ar)) || e.id;
+  if (e.title) {
+    if (e.title.ru) return e.title.ru; // интерфейс русский — русское название в приоритете
+    for (const v of Object.values(e.title)) if (v) return v;
+  }
+  return e.id;
 }
 
 function renderLibrary() {
@@ -1305,12 +1309,13 @@ function renderLibrary() {
     title.className = 'book-title';
     title.textContent = entryLabel(e);
     btn.appendChild(title);
-    const ar = e.title && e.title.ar;
-    if (ar && ar !== entryLabel(e)) {
+    // подзаголовок — название книги на другом её языке (если отличается от основного)
+    const subText = e.title && Object.values(e.title).find(v => v && v !== entryLabel(e));
+    if (subText) {
       const sub = document.createElement('span');
       sub.className = 'book-sub';
-      sub.dir = 'rtl';
-      sub.textContent = ar;
+      sub.dir = /[؀-ۿ]/.test(subText) ? 'rtl' : 'ltr';
+      sub.textContent = subText;
       btn.appendChild(sub);
     }
     const l = getLast(e.id);

@@ -10,6 +10,13 @@
       }
     },
     {
+      "id": "_sample-en",
+      "base": "books/_sample-en/",
+      "title": {
+        "en": "English Sample Book"
+      }
+    },
+    {
       "id": "tawfiq",
       "base": "books/tawfiq/",
       "title": {
