@@ -1342,8 +1342,8 @@ function entryLabel(e) {
 function renderLibrary() {
   document.body.dataset.view = 'library';
   book = null;
-  document.title = 'Параллельная читалка';
-  $('#chapter-title').textContent = library.length ? 'Библиотека' : 'Список книг пуст';
+  document.title = 'Библиотека Алькасави';
+  $('#chapter-title').textContent = library.length ? 'Библиотека Алькасави' : 'Список книг пуст';
   stream.innerHTML = '';
 
   const open = e => () => { history.pushState({}, '', '?book=' + encodeURIComponent(e.id)); openBook(e); };
@@ -1403,7 +1403,7 @@ function renderLibrary() {
   // подпись внизу полки: чья это библиотека
   const brand = document.createElement('div');
   brand.className = 'brand';
-  brand.innerHTML = 'Библиотека Исмаила · <a href="mailto:qaadiy@gmail.com">qaadiy@gmail.com</a>';
+  brand.innerHTML = 'Библиотека Алькасави · <a href="mailto:qaadiy@gmail.com">qaadiy@gmail.com</a>';
   stream.appendChild(brand);
   window.scrollTo(0, 0);
 }

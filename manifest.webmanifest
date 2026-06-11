@@ -1,6 +1,6 @@
 {
-  "name": "Параллельная читалка",
-  "short_name": "Читалка",
+  "name": "Библиотека Алькасави — параллельная читалка",
+  "short_name": "Алькасави",
   "description": "Параллельное чтение книг в двух языках, выровненных по смысловым секторам",
   "lang": "ru",
   "dir": "ltr",
@@ -11,7 +11,17 @@
   "background_color": "#fdfcf8",
   "theme_color": "#b07a2c",
   "icons": [
-    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
   ]
 }
