@@ -1,11 +1,11 @@
 {
   "bookId": "_sample-en",
-  "title": { "en": "English Sample Book" },
-  "languages": ["en"],
+  "title": { "en": "English Sample Book", "ru": "Английская мини-книга" },
+  "languages": ["en", "ru"],
   "rtl": [],
   "chapters": [
-    { "file": "01.md", "title": { "en": "On Reading" } },
-    { "file": "02.md", "title": { "en": "On Note-Taking" } }
+    { "file": "01.md", "title": { "en": "On Reading", "ru": "О чтении" } },
+    { "file": "02.md", "title": { "en": "On Note-Taking", "ru": "О ведении заметок" } }
   ],
   "hasImages": false
 }

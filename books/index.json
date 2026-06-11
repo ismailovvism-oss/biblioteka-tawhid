@@ -13,7 +13,8 @@
       "id": "_sample-en",
       "base": "books/_sample-en/",
       "title": {
-        "en": "English Sample Book"
+        "en": "English Sample Book",
+        "ru": "Английская мини-книга"
       }
     },
     {
