@@ -19,6 +19,7 @@ const DEFAULTS = {
   margin: 0.8,         // боковые поля колонки чтения, rem
   colRatio: 1,         // доля ширины оригинала в две колонки (перевод = 2 - colRatio)
   colRtl: true,        // в две колонки RTL-язык справа
+  shelfTag: null,      // выбранная категория на полке (null = все)
   highlights: {},      // bookId → [ { chapter, id, lang, start, end, ts } ]
   last: {},            // bookId → { chapter, sector, page, ts }
   bookmarks: {},       // bookId → [ { id, chapter, page, note, ts } ]
@@ -1369,9 +1370,31 @@ function renderLibrary() {
     stream.appendChild(card);
   }
 
+  // категории: чипсы-фильтры по полю tags из books/index.json
+  const tags = [...new Set(library.flatMap(e => e.tags || []))];
+  if (settings.shelfTag && !tags.includes(settings.shelfTag)) settings.shelfTag = null;
+  if (tags.length) {
+    const chips = document.createElement('div');
+    chips.className = 'chips';
+    for (const tag of [null, ...tags]) {
+      const c = document.createElement('button');
+      c.type = 'button';
+      c.className = 'chip' + (settings.shelfTag === tag ? ' active' : '');
+      c.textContent = tag || 'Все';
+      c.addEventListener('click', () => {
+        settings.shelfTag = tag;
+        saveSettings();
+        renderLibrary();
+      });
+      chips.appendChild(c);
+    }
+    stream.appendChild(chips);
+  }
+  const shown = settings.shelfTag ? library.filter(e => (e.tags || []).includes(settings.shelfTag)) : library;
+
   const ul = document.createElement('ul');
   ul.className = 'book-list';
-  for (const e of library) {
+  for (const e of shown) {
     const li = document.createElement('li');
     const btn = document.createElement('button');
     btn.type = 'button';

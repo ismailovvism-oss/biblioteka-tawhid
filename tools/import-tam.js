@@ -221,8 +221,9 @@ function main() {
 
   const idxPath = path.join(ROOT, 'books', 'index.json');
   const idx = JSON.parse(fs.readFileSync(idxPath, 'utf8'));
+  const prev = idx.books.find(b => b.id === BOOK_ID) || {};
   idx.books = idx.books.filter(b => b.id !== BOOK_ID);
-  idx.books.push({ id: BOOK_ID, base: 'books/tawfiq/', title: BOOK_TITLE });
+  idx.books.push({ ...prev, id: BOOK_ID, base: 'books/tawfiq/', title: BOOK_TITLE });
   fs.writeFileSync(idxPath, JSON.stringify(idx, null, 2) + '\n');
 
   console.log(`Готово: ${chapters.length} глав → books/tawfiq/{ar,ru}/, book.json, index.json.`);

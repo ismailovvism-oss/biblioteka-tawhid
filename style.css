@@ -518,3 +518,25 @@ mark.hl {
   max-height: 96px;
 }
 .about-line { margin: 0.5rem 0; }
+
+/* категории на полке */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.8rem 0 0.4rem;
+}
+.chip {
+  border: 1px solid var(--border, #c4bcad);
+  background: transparent;
+  color: inherit;
+  border-radius: 999px;
+  padding: 0.25rem 0.8rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.chip.active {
+  background: var(--accent, #b07a2c);
+  border-color: var(--accent, #b07a2c);
+  color: #fff;
+}
