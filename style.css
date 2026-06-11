@@ -613,3 +613,42 @@ mark.hl {
   padding: 0.1rem 0.4rem;
   border-radius: 999px;
 }
+
+/* карточка книги */
+.bookinfo {
+  margin: 1.2rem auto 0;
+  max-width: 46rem;
+  display: flex;
+  gap: 1.2rem;
+  flex-wrap: wrap;
+}
+.bookinfo-cover {
+  flex: 0 0 160px;
+  max-width: 160px;
+  aspect-ratio: 5 / 7.4;
+  cursor: default;
+}
+.bookinfo-meta { flex: 1 1 16rem; min-width: 0; }
+.bookinfo-meta h2 { margin: 0 0 0.3rem; }
+.bookinfo-sub { font-size: 1.05rem; color: var(--muted, #777); margin-bottom: 0.5rem; }
+.bookinfo-line { margin: 0.25rem 0; }
+.bookinfo-dim { color: var(--muted, #777); font-size: 0.9rem; }
+.bookinfo-desc { margin: 0.7rem 0 0; line-height: 1.55; }
+.bookinfo-actions { margin-top: 1rem; display: flex; gap: 0.6rem; flex-wrap: wrap; }
+.bookinfo-read {
+  background: var(--accent, #b07a2c);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 0.55rem 1.4rem;
+  font-size: 1rem;
+  cursor: pointer;
+}
+.bookinfo-restart {
+  background: transparent;
+  color: inherit;
+  border: 1px solid var(--border, #c4bcad);
+  border-radius: 8px;
+  padding: 0.55rem 1rem;
+  cursor: pointer;
+}

@@ -1441,7 +1441,10 @@ function renderLibrary() {
       note.textContent = l.page != null ? `стр. ${l.page}` : '⋯';
       btn.appendChild(note);
     }
-    btn.addEventListener('click', open(e));
+    btn.addEventListener('click', () => {
+      history.pushState({}, '', '?info=' + encodeURIComponent(e.id));
+      renderBookInfo(e);
+    });
     cell.appendChild(btn);
     shelf.appendChild(cell);
   }
@@ -1451,6 +1454,98 @@ function renderLibrary() {
   brand.className = 'brand';
   brand.innerHTML = 'Библиотека Алькасави · <a href="mailto:qaadiy@gmail.com">qaadiy@gmail.com</a>';
   stream.appendChild(brand);
+  window.scrollTo(0, 0);
+}
+
+/* ===== карточка книги: большая обложка, автор, аннотация, кнопки чтения ===== */
+async function renderBookInfo(entry) {
+  document.body.dataset.view = 'library';
+  book = null;
+  document.title = entryLabel(entry);
+  $('#chapter-title').textContent = entryLabel(entry);
+  stream.innerHTML = '';
+
+  // манифест книги — за автором, аннотацией и числом глав
+  let manifest = null;
+  const baseUrl = entry.base.endsWith('/') ? entry.base : entry.base + '/';
+  try { manifest = JSON.parse(await fetchText(baseUrl + 'book.json')); } catch { /* карточка работает и без манифеста */ }
+
+  const box = document.createElement('div');
+  box.className = 'bookinfo';
+
+  const cov = document.createElement('div');
+  cov.className = 'cover bookinfo-cover';
+  if (entry.cover) {
+    const img = document.createElement('img');
+    img.src = entry.cover;
+    img.alt = entryLabel(entry);
+    img.onerror = () => { img.remove(); cov.prepend(genCover(entry)); };
+    cov.appendChild(img);
+  } else cov.appendChild(genCover(entry));
+  box.appendChild(cov);
+
+  const meta = document.createElement('div');
+  meta.className = 'bookinfo-meta';
+  const h = document.createElement('h2');
+  h.textContent = entryLabel(entry);
+  meta.appendChild(h);
+  const subText = entry.title && Object.values(entry.title).find(v => v && v !== entryLabel(entry));
+  if (subText) {
+    const sub = document.createElement('div');
+    sub.className = 'bookinfo-sub';
+    sub.dir = /[؀-ۿ]/.test(subText) ? 'rtl' : 'ltr';
+    sub.textContent = subText;
+    meta.appendChild(sub);
+  }
+  const author = manifest && manifest.author && (manifest.author.ru || Object.values(manifest.author)[0]);
+  if (author) {
+    const a = document.createElement('div');
+    a.className = 'bookinfo-line';
+    a.textContent = 'Автор: ' + author;
+    meta.appendChild(a);
+  }
+  const bits = [];
+  if (manifest && Array.isArray(manifest.chapters)) bits.push(`глав: ${manifest.chapters.length}`);
+  if (manifest && Array.isArray(manifest.languages) && manifest.languages.length > 1)
+    bits.push('параллельный текст: ' + manifest.languages.map(l => langName(l).toLowerCase()).join(' + '));
+  if (entry.tags && entry.tags.length) bits.push(entry.tags.join(', '));
+  if (bits.length) {
+    const b = document.createElement('div');
+    b.className = 'bookinfo-line bookinfo-dim';
+    b.textContent = bits.join(' · ');
+    meta.appendChild(b);
+  }
+  if (manifest && manifest.description) {
+    const d = document.createElement('p');
+    d.className = 'bookinfo-desc';
+    d.textContent = manifest.description;
+    meta.appendChild(d);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'bookinfo-actions';
+  const goRead = (opts = {}) => {
+    history.pushState({}, '', '?book=' + encodeURIComponent(entry.id));
+    openBook(entry, opts);
+  };
+  const l = getLast(entry.id);
+  const primary = document.createElement('button');
+  primary.type = 'button';
+  primary.className = 'bookinfo-read';
+  primary.textContent = l ? (l.page != null ? `Продолжить · стр. ${l.page}` : 'Продолжить') : 'Читать';
+  primary.addEventListener('click', () => goRead());
+  actions.appendChild(primary);
+  if (l) {
+    const restart = document.createElement('button');
+    restart.type = 'button';
+    restart.className = 'bookinfo-restart';
+    restart.textContent = 'Сначала';
+    restart.addEventListener('click', () => goRead({ fromStart: true }));
+    actions.appendChild(restart);
+  }
+  meta.appendChild(actions);
+  box.appendChild(meta);
+  stream.appendChild(box);
   window.scrollTo(0, 0);
 }
 
@@ -1490,6 +1585,7 @@ async function openBook(entry, opts = {}) {
     if (ci >= 0) { await loadChapter(ci, opts.sector); return; }
     toast(`Сектор ${opts.sector} не найден`);
   }
+  if (opts.fromStart) { await loadChapter(0); return; }
   const last = getLast(bookId);
   const ci = last && Number.isInteger(last.chapter) ? last.chapter : 0;
   await loadChapter(Math.min(Math.max(ci, 0), book.chapters.length - 1), last ? last.sector : null);
@@ -1512,7 +1608,10 @@ function route() {
   const sector = params.get('s');
   // id сектора — только безопасные символы (sNNN/fnNNN/s050a и т.п.)
   const safeSector = sector && /^[\w-]+$/.test(sector) ? sector : null;
-  if (entry) openBook(entry, { sector: safeSector });
+  if (entry) { openBook(entry, { sector: safeSector }); return; }
+  const info = params.get('info');
+  const infoEntry = info ? library.find(b => b.id === info) : null;
+  if (infoEntry) renderBookInfo(infoEntry);
   else renderLibrary();
 }
 window.addEventListener('popstate', () => {
