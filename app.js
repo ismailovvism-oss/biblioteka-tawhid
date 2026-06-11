@@ -1340,6 +1340,27 @@ function entryLabel(e) {
   return e.id;
 }
 
+// обложка-заглушка: цвет из id, название по центру
+function genCover(e) {
+  const div = document.createElement('div');
+  div.className = 'cover-gen';
+  let h = 0;
+  for (const ch of e.id) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  div.style.background = `linear-gradient(160deg, hsl(${h},35%,38%), hsl(${h},45%,22%))`;
+  const t = document.createElement('span');
+  t.textContent = entryLabel(e);
+  div.appendChild(t);
+  const ar = e.title && e.title.ar;
+  if (ar && ar !== entryLabel(e)) {
+    const a = document.createElement('span');
+    a.className = 'cover-gen-ar';
+    a.dir = 'rtl';
+    a.textContent = ar;
+    div.appendChild(a);
+  }
+  return div;
+}
+
 function renderLibrary() {
   document.body.dataset.view = 'library';
   book = null;
@@ -1392,37 +1413,39 @@ function renderLibrary() {
   }
   const shown = settings.shelfTag ? library.filter(e => (e.tags || []).includes(settings.shelfTag)) : library;
 
-  const ul = document.createElement('ul');
-  ul.className = 'book-list';
+  // полка: обложки стоят на «деревянных» досках (сегменты ячеек сливаются в полку)
+  const shelf = document.createElement('div');
+  shelf.className = 'shelf';
   for (const e of shown) {
-    const li = document.createElement('li');
+    const cell = document.createElement('div');
+    cell.className = 'shelf-item';
     const btn = document.createElement('button');
     btn.type = 'button';
-    const title = document.createElement('span');
-    title.className = 'book-title';
-    title.textContent = entryLabel(e);
-    btn.appendChild(title);
-    // подзаголовок — название книги на другом её языке (если отличается от основного)
-    const subText = e.title && Object.values(e.title).find(v => v && v !== entryLabel(e));
-    if (subText) {
-      const sub = document.createElement('span');
-      sub.className = 'book-sub';
-      sub.dir = /[؀-ۿ]/.test(subText) ? 'rtl' : 'ltr';
-      sub.textContent = subText;
-      btn.appendChild(sub);
+    btn.className = 'cover';
+    btn.title = entryLabel(e);
+    btn.setAttribute('aria-label', entryLabel(e));
+    if (e.cover) {
+      const img = document.createElement('img');
+      img.src = e.cover;
+      img.alt = entryLabel(e);
+      img.loading = 'lazy';
+      img.onerror = () => { img.remove(); btn.prepend(genCover(e)); }; // битая обложка → заглушка
+      btn.appendChild(img);
+    } else {
+      btn.appendChild(genCover(e));
     }
     const l = getLast(e.id);
     if (l && (l.page != null || l.sector)) {
       const note = document.createElement('span');
-      note.className = 'book-note';
-      note.textContent = l.page != null ? `продолжить · стр. ${l.page}` : 'продолжить';
+      note.className = 'cover-badge';
+      note.textContent = l.page != null ? `стр. ${l.page}` : '⋯';
       btn.appendChild(note);
     }
     btn.addEventListener('click', open(e));
-    li.appendChild(btn);
-    ul.appendChild(li);
+    cell.appendChild(btn);
+    shelf.appendChild(cell);
   }
-  stream.appendChild(ul);
+  stream.appendChild(shelf);
   // подпись внизу полки: чья это библиотека
   const brand = document.createElement('div');
   brand.className = 'brand';
