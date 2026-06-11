@@ -66,7 +66,9 @@ function parse(body) {
     const l = raw.replace(/\s+$/, '');
     if (l.trim() === '' || l.trim() === '---') { flush(); continue; }
     const hm = l.match(/^(#{1,6})\s+(.*)$/);
-    if (hm) { flush(); blocks.push({ kind: 'heading', lines: [hm[2].trim()] }); continue; }
+    // заголовок открывает блок, но НЕ закрывает его: склеенный с абзацем заголовок
+    // (без пустой строки) — один сектор, как в Вычитке (секторы только по пустым строкам)
+    if (hm) { flush(); cur = { kind: 'heading', lines: [hm[2].trim()] }; continue; }
     if (!cur) cur = { kind: 'text', lines: [] };
     cur.lines.push(l);
   }
@@ -99,17 +101,49 @@ function numberFootnotes(blocks, defs) {
 
 const renumber = (s, map) => s.replace(/\[\^([^\]]+)\]/g, (w, k) => map.has(k) ? `[^${map.get(k)}]` : w);
 
+/*
+ * Двуязычные секторы в translation/ (аят «۞арабский» или арабский хадис + русский
+ * перевод вплотную) держат арабскую строку ради PDF-версии и паритета секторов.
+ * В читалке арабский показывается из ar/ — из русской стороны эти строки выбрасываем,
+ * иначе аят виден дважды. Сектор при этом остаётся (число секторов не меняется).
+ */
+const AR_CHAR = /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]/;
+function isArabicLine(l) {
+  if (/^\s*۞/.test(l)) return true;
+  const letters = [...l].filter(ch => /\p{L}/u.test(ch));
+  if (!letters.length) return false;
+  return letters.filter(ch => AR_CHAR.test(ch)).length / letters.length > 0.7;
+}
+
 // тело файла (source или translation) → текст в Контракте читалки + число секторов
-function convert(body) {
+// dropArabic — для русской стороны: выбросить арабские строки из текст-секторов
+function convert(body, { dropArabic = false, label = '' } = {}) {
   const { blocks, defs } = parse(body);
   const map = numberFootnotes(blocks, defs);
   const out = [];
   let s = 0;
+  let droppedAyat = 0, droppedOther = 0;
   for (const b of blocks) {
     out.push(`<!-- s${String(++s).padStart(3, '0')} -->`);
-    if (b.kind === 'heading') out.push('**' + renumber(b.lines[0], map) + '**');
-    else for (const l of b.lines) out.push(renumber(l, map));
+    if (b.kind === 'heading') {
+      out.push('**' + renumber(b.lines[0], map) + '**');
+      for (const l of b.lines.slice(1)) out.push(renumber(l, map));
+    } else {
+      let lines = b.lines;
+      if (dropArabic) {
+        const kept = lines.filter(l => !isArabicLine(l));
+        for (const l of lines) if (isArabicLine(l)) (/^\s*۞/.test(l) ? droppedAyat++ : droppedOther++);
+        if (!kept.length) console.warn(`  ⚠ ${label} s${String(s).padStart(3, '0')}: сектор состоял только из арабских строк — оставлен пустым, проверь данные`);
+        lines = kept;
+      }
+      for (const l of lines) out.push(renumber(l, map));
+    }
     out.push('');
+  }
+  if (dropArabic) {
+    for (const def of defs) {
+      if (def.lines.some(isArabicLine)) console.warn(`  ⚠ ${label} сноска [^${def.key}]: арабская строка внутри русской сноски — НЕ выброшена, проверь`);
+    }
   }
   for (const def of [...defs].sort((a, b) => map.get(a.key) - map.get(b.key))) {
     out.push(`<!-- fn${map.get(def.key)} -->`);
@@ -117,7 +151,7 @@ function convert(body) {
     out.push('');
   }
   const content = out.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
-  return { content, sectors: s };
+  return { content, sectors: s, droppedAyat, droppedOther };
 }
 
 function main() {
@@ -132,9 +166,11 @@ function main() {
 
   const chapters = [];
   const mismatches = [];
+  const dropReport = [];
   for (const file of chapterFiles()) {
     const tr = stripFrontmatter(fs.readFileSync(path.join(SRC, 'translation', file), 'utf8'));
-    const ru = convert(tr.body);
+    const ru = convert(tr.body, { dropArabic: true, label: file });
+    if (ru.droppedAyat || ru.droppedOther) dropReport.push(`${file}: аятов ${ru.droppedAyat}, прочих арабских строк ${ru.droppedOther}`);
     fs.writeFileSync(path.join(OUT, 'ru', file), ru.content);
 
     const srcPath = path.join(SRC, 'source', file);
@@ -162,6 +198,10 @@ function main() {
 
   console.log(`Готово: ${chapters.length} глав → books/tawfiq/{ar,ru}/, book.json, index.json.`);
   console.log(`Параллель ar↔ru: ${chapters.length - mismatches.length}/${chapters.length} глав выровнены ✓`);
+  if (dropReport.length) {
+    console.log(`Из русской стороны выброшены арабские строки двуязычных секторов (арабский остаётся в ar/):`);
+    for (const r of dropReport) console.log('  ' + r);
+  }
   if (mismatches.length) {
     console.log(`Пока без арабского (нужен паритет абзацев в Вычитке) — ${mismatches.length}:`);
     for (const m of mismatches) console.log('  ' + m);
