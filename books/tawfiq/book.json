@@ -235,5 +235,6 @@
       }
     }
   ],
-  "hasImages": false
+  "hasImages": true,
+  "imagePattern": "img/p{page}.jpg"
 }

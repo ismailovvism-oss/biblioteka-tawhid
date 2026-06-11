@@ -211,7 +211,11 @@ function main() {
     chapters.push({ file, title: { ru: tr.title || file.replace(/\.md$/, '') } });
   }
 
-  const book = { bookId: BOOK_ID, title: BOOK_TITLE, languages: ['ar', 'ru'], rtl: ['ar'], chapters, hasImages: false };
+  // сканы страниц: books/tawfiq/img/pN.jpg, N = книжная страница (= pdf-страница − 2)
+  const book = {
+    bookId: BOOK_ID, title: BOOK_TITLE, languages: ['ar', 'ru'], rtl: ['ar'], chapters,
+    hasImages: true, imagePattern: 'img/p{page}.jpg',
+  };
   fs.writeFileSync(path.join(OUT, 'book.json'), JSON.stringify(book, null, 2) + '\n');
 
   const idxPath = path.join(ROOT, 'books', 'index.json');
