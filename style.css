@@ -161,7 +161,7 @@ body[data-peek] .pair { cursor: pointer; }
 
 /* самопроверка: скрытый перевод обозначен заглушкой, тап по паре раскрывает/прячет */
 body[data-quiz] .pair:not(.peek):not(.is-footnote):has(> .member.lang-hidden)::after {
-  content: '· · · перевод · · ·';
+  content: '· · · тапни — проверь себя · · ·';
   display: block;
   text-align: center;
   font-size: 0.78em;

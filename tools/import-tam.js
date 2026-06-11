@@ -47,6 +47,14 @@ function delinkWiki(s) {
 const isDef = l => /^\s*\[\^[^\]]+\]:/.test(l);
 
 /*
+ * Маркер страницы в мастере (формат Вычитки): <!-- ص: 152 --> отдельной строкой
+ * перед абзацем, с которого начинается страница тома. Ставится только в source/.
+ * Принимаем и западные, и арабо-индийские цифры; на выходе — <!-- p152 --> Контракта.
+ */
+const PAGE_RE = /^<!--\s*(?:ص|p)\s*:?\s*([0-9٠-٩]+)\s*-->$/;
+const toWesternDigits = s => s.replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x0660));
+
+/*
  * Разбор тела на основной поток (блоки) и определения сносок.
  * Блок основного потока = абзац между пустыми строками; заголовок ## — отдельный блок.
  * Сноски лежат сплошным хвостом внизу файла.
@@ -61,16 +69,20 @@ function parse(body) {
   while (main.length && (main[main.length - 1].trim() === '' || main[main.length - 1].trim() === '---')) main.pop();
   const blocks = [];
   let cur = null;
+  let pendingPage = null; // страница из маркера — присвоится следующему блоку
   const flush = () => { if (cur && cur.lines.length) blocks.push(cur); cur = null; };
   for (const raw of main) {
     const l = raw.replace(/\s+$/, '');
     if (l.trim() === '' || l.trim() === '---') { flush(); continue; }
+    const pm = l.trim().match(PAGE_RE);
+    if (pm) { pendingPage = parseInt(toWesternDigits(pm[1]), 10); continue; }
     const hm = l.match(/^(#{1,6})\s+(.*)$/);
     // заголовок открывает блок, но НЕ закрывает его: склеенный с абзацем заголовок
     // (без пустой строки) — один сектор, как в Вычитке (секторы только по пустым строкам)
-    if (hm) { flush(); cur = { kind: 'heading', lines: [hm[2].trim()] }; continue; }
-    if (!cur) cur = { kind: 'text', lines: [] };
-    cur.lines.push(l);
+    if (hm) { flush(); cur = { kind: 'heading', lines: [hm[2].trim()] }; }
+    else if (!cur) cur = { kind: 'text', lines: [] };
+    if (pendingPage != null && cur.page == null) { cur.page = pendingPage; pendingPage = null; }
+    if (!hm) cur.lines.push(l);
   }
   flush();
 
@@ -124,6 +136,7 @@ function convert(body, { dropArabic = false, label = '' } = {}) {
   let s = 0;
   let droppedAyat = 0, droppedOther = 0;
   for (const b of blocks) {
+    if (b.page != null) out.push(`<!-- p${b.page} -->`);
     out.push(`<!-- s${String(++s).padStart(3, '0')} -->`);
     if (b.kind === 'heading') {
       out.push('**' + renumber(b.lines[0], map) + '**');

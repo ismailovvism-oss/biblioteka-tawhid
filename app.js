@@ -9,7 +9,7 @@
 const SETTINGS_KEY = 'chitalka:settings';
 const DEFAULTS = {
   theme: 'light',      // light | dark
-  visibility: 'both',  // both | <lang> | quiz (самопроверка: оригинал + перевод по тапу)
+  visibility: 'both',  // both | <lang> | quiz:<lang> (самопроверка: виден <lang>, второй язык по тапу)
   layout: 'auto',      // auto | v | h
   fnMode: 'inline',    // inline | jump
   align: 'start',      // start | justify — выравнивание текста
@@ -224,15 +224,15 @@ function renderChapter() {
   applyHighlights();
 }
 
-/* ===== видимость языков: both → <orig> → <trans> → quiz (самопроверка) ===== */
-// фактически показанный язык: в самопроверке виден только оригинал
+/* ===== видимость языков: both → <orig> → <trans> → quiz:<orig> → quiz:<trans> ===== */
+// фактически показанный язык: в самопроверке 'quiz:<lang>' виден <lang>
 function visibleLang() {
-  return settings.visibility === 'quiz' ? book.languages[0] : settings.visibility;
+  return settings.visibility.startsWith('quiz:') ? settings.visibility.slice(5) : settings.visibility;
 }
 
 function applyVisibility() {
   if (!book) return;
-  const quiz = settings.visibility === 'quiz';
+  const quiz = settings.visibility.startsWith('quiz:');
   const vis = visibleLang();
   document.querySelectorAll('.member').forEach(m => {
     m.classList.toggle('lang-hidden', vis !== 'both' && m.getAttribute('lang') !== vis);
@@ -247,7 +247,7 @@ function applyVisibility() {
   document.body.toggleAttribute('data-quiz', quiz);
   if (vis === 'both') clearPeeks();
   $('#btn-vis').textContent =
-    quiz ? book.languages[0].toUpperCase() + '+?' :
+    quiz ? vis.toUpperCase() + '+?' :
     vis === 'both' ? displayLangs().map(l => l.toUpperCase()).join('+') : vis.toUpperCase();
 }
 
@@ -256,8 +256,10 @@ function clearPeeks() {
 }
 
 function cycleVisibility() {
-  // самопроверка есть только у двуязычных книг (нужен перевод, который скрываем)
-  const order = book.languages.length > 1 ? ['both', ...book.languages, 'quiz'] : ['both', ...book.languages];
+  // самопроверка есть только у двуязычных книг и работает в обе стороны
+  const order = book.languages.length > 1
+    ? ['both', ...book.languages, ...book.languages.map(l => 'quiz:' + l)]
+    : ['both', ...book.languages];
   const cur = order.indexOf(settings.visibility);
   settings.visibility = order[(cur + 1) % order.length];
   saveSettings();
@@ -962,7 +964,7 @@ function importSettings(file) {
     syncSettingControls();
     if (book) {
       // видимость из бэкапа могла быть с языком другой книги — иначе глава станет пустой
-      if (!['both', ...book.languages, ...(book.languages.length > 1 ? ['quiz'] : [])].includes(settings.visibility)) settings.visibility = 'both';
+      if (!['both', ...book.languages, ...(book.languages.length > 1 ? book.languages.map(l => 'quiz:' + l) : [])].includes(settings.visibility)) settings.visibility = 'both';
       ensureFontDefaults();
       applyFonts();
       setupFontSettings();
@@ -1367,7 +1369,7 @@ async function openBook(entry, opts = {}) {
   }
   if (!Array.isArray(book.rtl)) book.rtl = [];
   if (!book.title) book.title = { [book.languages[0]]: entry.id };
-  if (!['both', ...book.languages, ...(book.languages.length > 1 ? ['quiz'] : [])].includes(settings.visibility)) settings.visibility = 'both';
+  if (!['both', ...book.languages, ...(book.languages.length > 1 ? book.languages.map(l => 'quiz:' + l) : [])].includes(settings.visibility)) settings.visibility = 'both';
   ensureFontDefaults();
   applyFonts();
   setupFontSettings();
