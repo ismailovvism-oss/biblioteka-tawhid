@@ -26,9 +26,20 @@ const BOOK_ID = 'tawfiq';
 const BOOK_TITLE = { ar: 'توفيق المنان', ru: 'Тауфик аль-Маннан' };
 
 function chapterFiles() {
+  // естественный порядок частей: 06a < 06a-2 < 06a-2-2 < 06b
+  // (лексически дефис стоит раньше точки, и 06a-2.md сортировался ПЕРЕД 06a.md)
+  const key = f => {
+    const m = f.match(/^(\d+)([a-z]?)(?:-(\d+))?(?:-(\d+))?/);
+    return [+m[1], m[2] || '', +(m[3] || 0), +(m[4] || 0)];
+  };
+  const cmp = (a, b) => {
+    const ka = key(a), kb = key(b);
+    for (let i = 0; i < 4; i++) if (ka[i] !== kb[i]) return ka[i] < kb[i] ? -1 : 1;
+    return 0;
+  };
   return fs.readdirSync(path.join(SRC, 'translation'))
     .filter(f => f.endsWith('.md'))
-    .sort(); // имена с ведущим нулём сортируются лексически верно (01 < 05a < 06a < 14 < 18)
+    .sort(cmp);
 }
 
 function stripFrontmatter(text) {
