@@ -19,7 +19,8 @@ const DEFAULTS = {
   margin: 0.8,         // боковые поля колонки чтения, rem
   colRatio: 1,         // доля ширины оригинала в две колонки (перевод = 2 - colRatio)
   colRtl: true,        // в две колонки RTL-язык справа
-  shelfTag: null,      // выбранная категория на полке (null = все)
+  shelfCat: [],        // выбранный путь в дереве категорий ([] = корень)
+  shelfFacets: {},     // активные фасеты: { langs:[], authors:[], era:[], tags:[] }
   highlights: {},      // bookId → [ { chapter, id, lang, start, end, ts } ]
   last: {},            // bookId → { chapter, sector, page, ts }
   bookmarks: {},       // bookId → [ { id, chapter, page, note, ts } ]
@@ -1428,6 +1429,31 @@ function genCover(e) {
   return div;
 }
 
+/* фасеты библиотеки: ключ в записи index.json → подпись и формат значения */
+const FACETS = [
+  { key: 'langs', label: 'Язык', fmt: v => langName(v) },
+  { key: 'authors', label: 'Автор', fmt: v => v },
+  { key: 'era', label: 'Эпоха', fmt: v => v },
+  { key: 'tags', label: 'Тема', fmt: v => v },
+];
+function entryFacetVals(e, key) {
+  const v = e[key];
+  return Array.isArray(v) ? v : (v ? [v] : []);
+}
+function entryInCat(e, cat) {
+  const p = e.category || [];
+  return cat.every((seg, i) => p[i] === seg); // запись лежит в выбранной ветке (или глубже)
+}
+function entryMatchesFacets(e, facets) {
+  for (const f of FACETS) {
+    const sel = facets[f.key];
+    if (!sel || !sel.length) continue;            // группа неактивна
+    const vals = entryFacetVals(e, f.key);
+    if (!sel.some(v => vals.includes(v))) return false; // внутри группы — ИЛИ, между группами — И
+  }
+  return true;
+}
+
 function renderLibrary() {
   document.body.dataset.view = 'library';
   book = null;
@@ -1458,27 +1484,92 @@ function renderLibrary() {
     stream.appendChild(card);
   }
 
-  // категории: чипсы-фильтры по полю tags из books/index.json
-  const tags = [...new Set(library.flatMap(e => e.tags || []))];
-  if (settings.shelfTag && !tags.includes(settings.shelfTag)) settings.shelfTag = null;
-  if (tags.length) {
-    const chips = document.createElement('div');
-    chips.className = 'chips';
-    for (const tag of [null, ...tags]) {
+  // ── классификатор: дерево категорий + фасеты (по полям записи index.json) ──
+  const cat = Array.isArray(settings.shelfCat) ? settings.shelfCat : (settings.shelfCat = []);
+  const facets = (settings.shelfFacets && typeof settings.shelfFacets === 'object') ? settings.shelfFacets : (settings.shelfFacets = {});
+  const panel = document.createElement('div');
+  panel.className = 'classifier';
+
+  // хлебные крошки по выбранному пути дерева
+  const crumbs = document.createElement('div');
+  crumbs.className = 'crumbs';
+  const addCrumb = (label, depth) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'crumb' + (depth === cat.length ? ' active' : '');
+    b.textContent = label;
+    b.addEventListener('click', () => { settings.shelfCat = cat.slice(0, depth); saveSettings(); renderLibrary(); });
+    crumbs.appendChild(b);
+  };
+  addCrumb('Все книги', 0);
+  cat.forEach((seg, i) => {
+    const sep = document.createElement('span'); sep.className = 'crumb-sep'; sep.textContent = '›'; crumbs.appendChild(sep);
+    addCrumb(seg, i + 1);
+  });
+  panel.appendChild(crumbs);
+
+  // книги в текущей ветке дерева
+  const underCat = library.filter(e => entryInCat(e, cat));
+
+  // под-категории текущего уровня (с числом книг)
+  const children = new Map();
+  for (const e of underCat) {
+    const p = e.category || [];
+    if (p.length > cat.length) children.set(p[cat.length], (children.get(p[cat.length]) || 0) + 1);
+  }
+  if (children.size) {
+    const row = document.createElement('div');
+    row.className = 'chips';
+    for (const [name, n] of [...children.entries()].sort((a, b) => a[0].localeCompare(b[0], 'ru'))) {
       const c = document.createElement('button');
       c.type = 'button';
-      c.className = 'chip' + (settings.shelfTag === tag ? ' active' : '');
-      c.textContent = tag || 'Все';
+      c.className = 'chip cat-chip';
+      c.textContent = `${name} · ${n}`;
+      c.addEventListener('click', () => { settings.shelfCat = [...cat, name]; saveSettings(); renderLibrary(); });
+      row.appendChild(c);
+    }
+    panel.appendChild(row);
+  }
+
+  // фасеты: значения берём из книг текущей ветки
+  for (const f of FACETS) {
+    const counts = new Map();
+    for (const e of underCat) for (const v of entryFacetVals(e, f.key)) counts.set(v, (counts.get(v) || 0) + 1);
+    const sel = facets[f.key] || [];
+    if (counts.size < 2 && !sel.length) continue; // нечего фильтровать
+    const grp = document.createElement('div');
+    grp.className = 'facet';
+    const lab = document.createElement('span'); lab.className = 'facet-label'; lab.textContent = f.label;
+    grp.appendChild(lab);
+    const chips = document.createElement('div'); chips.className = 'chips';
+    for (const [v, n] of [...counts.entries()].sort((a, b) => b[1] - a[1])) {
+      const c = document.createElement('button');
+      c.type = 'button';
+      const on = sel.includes(v);
+      c.className = 'chip' + (on ? ' active' : '');
+      c.textContent = `${f.fmt(v)} · ${n}`;
       c.addEventListener('click', () => {
-        settings.shelfTag = tag;
-        saveSettings();
-        renderLibrary();
+        const cur = facets[f.key] || [];
+        facets[f.key] = on ? cur.filter(x => x !== v) : [...cur, v];
+        saveSettings(); renderLibrary();
       });
       chips.appendChild(c);
     }
-    stream.appendChild(chips);
+    grp.appendChild(chips);
+    panel.appendChild(grp);
   }
-  const shown = settings.shelfTag ? library.filter(e => (e.tags || []).includes(settings.shelfTag)) : library;
+
+  if (cat.length || FACETS.some(f => (facets[f.key] || []).length)) {
+    const reset = document.createElement('button');
+    reset.type = 'button';
+    reset.className = 'facet-reset';
+    reset.textContent = '✕ Сбросить фильтры';
+    reset.addEventListener('click', () => { settings.shelfCat = []; settings.shelfFacets = {}; saveSettings(); renderLibrary(); });
+    panel.appendChild(reset);
+  }
+  stream.appendChild(panel);
+
+  const shown = underCat.filter(e => entryMatchesFacets(e, facets));
 
   // полка: обложки стоят на «деревянных» досках (сегменты ячеек сливаются в полку)
   const shelf = document.createElement('div');
@@ -1516,6 +1607,12 @@ function renderLibrary() {
     shelf.appendChild(cell);
   }
   stream.appendChild(shelf);
+  if (!shown.length) {
+    const m = document.createElement('div');
+    m.className = 'shelf-empty';
+    m.textContent = 'По выбранным фильтрам книг нет.';
+    stream.appendChild(m);
+  }
   // подпись внизу полки: чья это библиотека
   const brand = document.createElement('div');
   brand.className = 'brand';

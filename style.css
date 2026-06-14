@@ -542,6 +542,18 @@ mark.hl {
 .chip-off { opacity: 0.4; cursor: default; }
 #search-scope { margin: 0.5rem 0 0.2rem; }
 
+/* ===== классификатор библиотеки: дерево категорий + фасеты ===== */
+.classifier { margin: 0.6rem 0 0.2rem; }
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 0.15rem 0.3rem; margin-bottom: 0.5rem; }
+.crumb { padding: 0.15rem 0.35rem; border-radius: 6px; color: var(--accent); font-size: 0.92rem; }
+.crumb.active { color: var(--fg); font-weight: bold; cursor: default; }
+.crumb-sep { color: var(--muted); }
+.cat-chip { font-weight: 600; }
+.facet { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem; margin: 0.35rem 0; }
+.facet-label { color: var(--muted); font-size: 0.8rem; min-width: 3.2rem; }
+.facet-reset { margin: 0.3rem 0 0.2rem; color: var(--muted); font-size: 0.85rem; }
+.shelf-empty { margin: 1.2rem 0; color: var(--muted); text-align: center; }
+
 /* полка с обложками */
 .shelf {
   margin: 1rem auto 0;

@@ -267,7 +267,13 @@ function main() {
   const idx = JSON.parse(fs.readFileSync(idxPath, 'utf8'));
   const prev = idx.books.find(b => b.id === BOOK_ID) || {};
   idx.books = idx.books.filter(b => b.id !== BOOK_ID);
-  idx.books.push({ ...prev, id: BOOK_ID, base: 'books/tawfiq/', title: BOOK_TITLE });
+  // классификация (category/tags/era) задаётся в реестре вручную и сохраняется через ...prev;
+  // langs/authors денормализуем из манифеста для фасетов библиотеки
+  idx.books.push({
+    ...prev, id: BOOK_ID, base: 'books/tawfiq/', title: BOOK_TITLE,
+    langs: book.languages,
+    authors: prev.authors || (book.author ? [book.author.ru || Object.values(book.author)[0]].filter(Boolean) : undefined),
+  });
   fs.writeFileSync(idxPath, JSON.stringify(idx, null, 2) + '\n');
 
   console.log(`Готово: ${chapters.length} глав → books/tawfiq/{ar,ru}/, book.json, index.json.`);
