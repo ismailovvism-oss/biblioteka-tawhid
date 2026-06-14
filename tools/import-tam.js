@@ -88,12 +88,19 @@ function parse(body) {
     const pm = l.trim().match(PAGE_RE);
     if (pm) { pendingPage = parseInt(toWesternDigits(pm[1]), 10); continue; }
     const hm = l.match(/^(#{1,6})\s+(.*)$/);
-    // заголовок открывает блок, но НЕ закрывает его: склеенный с абзацем заголовок
-    // (без пустой строки) — один сектор, как в Вычитке (секторы только по пустым строкам)
-    if (hm) { flush(); cur = { kind: 'heading', lines: [hm[2].trim()] }; }
-    else if (!cur) cur = { kind: 'text', lines: [] };
+    // Заголовок — самостоятельный, тут же закрытый блок. Сектором он НЕ становится
+    // (см. convert): прицепляется к следующему текст-сектору как часть того же sNNN,
+    // иначе лишний блок сдвинул бы посекторную парность с арабским оригиналом.
+    if (hm) {
+      flush();
+      const hb = { kind: 'heading', lines: [hm[2].trim()] };
+      if (pendingPage != null) { hb.page = pendingPage; pendingPage = null; }
+      blocks.push(hb);
+      continue;
+    }
+    if (!cur) cur = { kind: 'text', lines: [] };
     if (pendingPage != null && cur.page == null) { cur.page = pendingPage; pendingPage = null; }
-    if (!hm) cur.lines.push(l);
+    cur.lines.push(l);
   }
   flush();
 
@@ -143,26 +150,61 @@ function isArabicLine(l) {
 function convert(body, { dropArabic = false, label = '' } = {}) {
   const { blocks, defs } = parse(body);
   const map = numberFootnotes(blocks, defs);
+  let droppedAyat = 0, droppedOther = 0;
+
+  // строки текст-блока (с вырезкой арабского для русской стороны)
+  const renderTextLines = (b) => {
+    let lines = b.lines;
+    if (dropArabic) {
+      const kept = lines.filter(l => !isArabicLine(l));
+      for (const l of lines) if (isArabicLine(l)) (/^\s*۞/.test(l) ? droppedAyat++ : droppedOther++);
+      if (!kept.length) console.warn(`  ⚠ ${label} (заголовочный/пустой сектор): после вырезки арабского строк не осталось — проверь данные`);
+      lines = kept;
+    }
+    return lines.map(l => renumber(l, map));
+  };
+
+  // Собираем секторы. Заголовок НЕ открывает свой сектор: он копится в pendingHeads
+  // и прицепляется к следующему текст-сектору как ведущая часть того же baseId sNNN
+  // (части a=заголовок(и), b=текст). Так заголовок виден, а число секторов = арабскому.
+  const sectors = [];
+  let pendingHeads = [];
+  let pendingPage = null;
+  for (const b of blocks) {
+    if (b.kind === 'heading') {
+      if (b.page != null && pendingPage == null) pendingPage = b.page;
+      pendingHeads.push(['**' + renumber(b.lines[0], map) + '**']);
+      continue;
+    }
+    const page = (b.page != null) ? b.page : pendingPage;
+    pendingPage = null;
+    sectors.push({ page, parts: [...pendingHeads, renderTextLines(b)] });
+    pendingHeads = [];
+  }
+  // заголовки без последующего текста — доп. части последнего сектора (не новый сектор)
+  if (pendingHeads.length) {
+    if (sectors.length) sectors[sectors.length - 1].parts.push(...pendingHeads);
+    else sectors.push({ page: pendingPage, parts: pendingHeads });
+  }
+
   const out = [];
   let s = 0;
-  let droppedAyat = 0, droppedOther = 0;
-  for (const b of blocks) {
-    if (b.page != null) out.push(`<!-- p${b.page} -->`);
-    out.push(`<!-- s${String(++s).padStart(3, '0')} -->`);
-    if (b.kind === 'heading') {
-      out.push('**' + renumber(b.lines[0], map) + '**');
-      for (const l of b.lines.slice(1)) out.push(renumber(l, map));
+  const LETTERS = 'abcdefghijklmnopqrstuvwxyz';
+  for (const sec of sectors) {
+    if (sec.page != null) out.push(`<!-- p${sec.page} -->`);
+    s++;
+    const base = `s${String(s).padStart(3, '0')}`;
+    if (sec.parts.length === 1) {
+      out.push(`<!-- ${base} -->`);
+      for (const l of sec.parts[0]) out.push(l);
+      out.push('');
     } else {
-      let lines = b.lines;
-      if (dropArabic) {
-        const kept = lines.filter(l => !isArabicLine(l));
-        for (const l of lines) if (isArabicLine(l)) (/^\s*۞/.test(l) ? droppedAyat++ : droppedOther++);
-        if (!kept.length) console.warn(`  ⚠ ${label} s${String(s).padStart(3, '0')}: сектор состоял только из арабских строк — оставлен пустым, проверь данные`);
-        lines = kept;
-      }
-      for (const l of lines) out.push(renumber(l, map));
+      sec.parts.forEach((pl, i) => {
+        out.push(`<!-- ${base}${LETTERS[i]} -->`);
+        for (const l of pl) out.push(l);
+        out.push('');
+      });
     }
-    out.push('');
   }
   if (dropArabic) {
     for (const def of defs) {
