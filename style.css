@@ -209,6 +209,25 @@ body[data-layout="h"]:not([data-colrtl]) .pair > .member + .member {
   padding-left: 1.2rem;
 }
 
+/* односторонний сектор во всю ширину: основной текст (только перевод) или
+   оригинал без готового перевода — занимает всю строку, без пустой колонки */
+body[data-layout="h"] .pair.solo > .member { flex-basis: 100%; }
+
+/* «оригинал есть, перевод готовится»: во всю ширину + тонкая акцентная метка.
+   Слово — в подсказке (title), в каждом секторе предложение не повторяем.
+   Показываем только в параллельном чтении (в одноязычном просмотре data-peek). */
+body:not([data-peek]) .pair.awaiting { position: relative; }
+body:not([data-peek]) .pair.awaiting > .member {
+  border-inline-end: 2px dashed var(--accent-soft);
+  padding-inline-end: 0.9rem;
+}
+body:not([data-peek]) .pair.awaiting::after {
+  content: "⟳";
+  position: absolute; top: 0.3rem; inset-inline-end: 0.45rem;
+  font-size: 0.8rem; line-height: 1; color: var(--accent); opacity: 0.6;
+  pointer-events: none;
+}
+
 /* RTL-язык справа: порядок по направлению письма, разделитель — на правой колонке */
 body[data-layout="h"][data-colrtl] .pair > .member[dir="ltr"] { order: 1; }
 body[data-layout="h"][data-colrtl] .pair > .member[dir="rtl"] {

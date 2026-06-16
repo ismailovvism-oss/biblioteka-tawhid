@@ -212,6 +212,20 @@ function renderChapter() {
       el.appendChild(label);
     }
     buildMembers(pair, el);
+    // односторонние текст-сектора — во всю ширину: основной текст книги (есть
+    // только перевод) ИЛИ оригинал, перевод которого ещё не готов («awaiting»).
+    // Помечаем структурно (по наличию контента), чтобы пережить смену видимости;
+    // саму метку «идёт перевод» показывает CSS только в параллельном режиме.
+    if (pair.type === 'text') {
+      const present = book.languages.filter(l => pair[l] != null);
+      if (present.length === 1) {
+        el.classList.add('solo');
+        if (present[0] === book.languages[0] && book.languages.length > 1) {
+          el.classList.add('awaiting');
+          el.title = 'Перевод готовится';
+        }
+      }
+    }
     stream.appendChild(el);
   }
   if (!pairs.length) {
