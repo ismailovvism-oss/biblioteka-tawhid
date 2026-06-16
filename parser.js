@@ -16,14 +16,70 @@ function escapeHtml(s) {
     .replace(/"/g, '&quot;');
 }
 
-/* Inline-markdown внутри сектора: жирный, курсив, маркеры сносок [^N]. */
+/* Inline-markdown внутри сектора: подчёркивание, жирный, курсив, маркеры сносок [^N]. */
 function inlineMd(text) {
   let h = escapeHtml(text);
+  h = h.replace(/&lt;u&gt;([\s\S]*?)&lt;\/u&gt;/g, '<u>$1</u>'); // подчёркивание <u>…</u>
   h = h.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   h = h.replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>');
   h = h.replace(/\[\^(\d+)\]/g, '<button class="fnref" data-fn="$1" type="button">$1</button>');
   h = h.replace(/\n/g, '<br>');
   return h;
+}
+
+/* Заголовок callout по типу, если автор не задал свой (для [!quote] и т. п.). */
+const CALLOUT_LABELS = {
+  quote: 'Цитата', note: 'Примечание', info: 'Инфо', tip: 'Совет',
+  important: 'Важное', warning: 'Предупреждение', success: 'Готово',
+  question: 'Вопрос', failure: 'Ошибка', danger: 'Опасно',
+  example: 'Пример', abstract: 'Резюме',
+};
+
+/*
+ * Блочный markdown внутри сектора: цитата (> ), callout (> [!тип] загол.),
+ * списки (- / 1.), иначе обычный абзац. Рекурсивно: цитата/callout могут
+ * содержать вложенные блоки. Тип callout произвольный — неизвестный получает
+ * дефолтный стиль (.callout-<тип>), так что набор типов не захардкожен.
+ */
+function renderBlocks(lines) {
+  const isQuote = l => /^>\s?/.test(l);
+  const isUl = l => /^[-*]\s+/.test(l);
+  const isOl = l => /^\d+\.\s+/.test(l);
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (isQuote(lines[i])) {
+      const run = [];
+      while (i < lines.length && isQuote(lines[i])) { run.push(lines[i].replace(/^>\s?/, '')); i++; }
+      const m = run[0] && run[0].match(/^\[!([\w-]+)\]\s*(.*)$/);
+      if (m) {
+        const type = m[1].toLowerCase();
+        const title = (m[2] || '').trim() || CALLOUT_LABELS[type] || (type[0].toUpperCase() + type.slice(1));
+        const body = run.slice(1);
+        out.push('<div class="callout callout-' + type + '">'
+          + '<div class="callout-title">' + inlineMd(title) + '</div>'
+          + (body.length ? '<div class="callout-body">' + renderBlocks(body).join('') + '</div>' : '')
+          + '</div>');
+      } else {
+        out.push('<blockquote>' + renderBlocks(run).join('') + '</blockquote>');
+      }
+      continue;
+    }
+    if (isUl(lines[i]) || isOl(lines[i])) {
+      const ordered = isOl(lines[i]);
+      const tag = ordered ? 'ol' : 'ul';
+      const items = [];
+      while (i < lines.length && (ordered ? isOl(lines[i]) : isUl(lines[i]))) {
+        items.push(lines[i].replace(ordered ? /^\d+\.\s+/ : /^[-*]\s+/, '')); i++;
+      }
+      out.push('<' + tag + '>' + items.map(it => '<li>' + inlineMd(it) + '</li>').join('') + '</' + tag + '>');
+      continue;
+    }
+    const run = [];
+    while (i < lines.length && !isQuote(lines[i]) && !isUl(lines[i]) && !isOl(lines[i])) { run.push(lines[i]); i++; }
+    out.push('<p>' + inlineMd(run.join('\n')) + '</p>');
+  }
+  return out;
 }
 
 /*
@@ -84,7 +140,7 @@ function parseFile(md) {
 function renderGroup(group) {
   const out = [];
   for (const part of group.parts) {
-    for (const para of part.paras) out.push('<p>' + inlineMd(para) + '</p>');
+    for (const para of part.paras) out.push(...renderBlocks(para.split('\n')));
   }
   return out.join('');
 }
