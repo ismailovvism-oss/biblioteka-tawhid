@@ -681,6 +681,22 @@ mark.hl {
   padding: 0.1rem 0.4rem;
   border-radius: 999px;
 }
+/* бейдж статуса доверия: одобрено / требует проверки / в работе */
+.review-badge {
+  position: absolute;
+  z-index: 3;
+  top: 4px; left: 4px;
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 0.66rem; font-weight: 700; line-height: 1;
+  padding: 0.14rem 0.42rem;
+  border-radius: 999px;
+  color: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+.review-approved { background: #3f8f54; }
+.review-caution  { background: #c9821e; }
+.review-draft    { background: #6f6f68; }
+.bookinfo-cover .review-badge { font-size: 0.74rem; }
 
 /* карточка книги */
 .bookinfo {

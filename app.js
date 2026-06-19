@@ -1444,7 +1444,23 @@ function genCover(e) {
 }
 
 /* фасеты библиотеки: ключ в записи index.json → подпись и формат значения */
+// статус доверия книги (одно значение): бейдж на обложке + фасет «Статус»
+const REVIEW = {
+  approved: { label: 'Одобрено администрацией', short: 'Одобрено', icon: '✓', cls: 'review-approved' },
+  caution:  { label: 'Осторожно, требует проверки', short: 'Требует проверки', icon: '⚠', cls: 'review-caution' },
+  draft:    { label: 'В работе', short: 'В работе', icon: '🚧', cls: 'review-draft' },
+};
+function reviewBadge(e, full) {
+  const r = e && e.review && REVIEW[e.review];
+  if (!r) return null;
+  const b = document.createElement('span');
+  b.className = 'review-badge ' + r.cls;
+  b.textContent = full ? (r.icon + ' ' + r.short) : r.icon;
+  b.title = r.label;
+  return b;
+}
 const FACETS = [
+  { key: 'review', label: 'Статус', fmt: v => (REVIEW[v] ? REVIEW[v].icon + ' ' + REVIEW[v].short : v) },
   { key: 'langs', label: 'Язык', fmt: v => langName(v) },
   { key: 'authors', label: 'Автор', fmt: v => v },
   { key: 'madhhab', label: 'Мазхаб', fmt: v => v },
@@ -1615,6 +1631,8 @@ function renderLibrary() {
       note.textContent = l.page != null ? `стр. ${l.page}` : '⋯';
       btn.appendChild(note);
     }
+    const rb = reviewBadge(e, false);
+    if (rb) btn.appendChild(rb);
     btn.addEventListener('click', () => {
       history.pushState({}, '', '?info=' + encodeURIComponent(e.id));
       renderBookInfo(e);
@@ -1662,6 +1680,8 @@ async function renderBookInfo(entry) {
     img.onerror = () => { img.remove(); cov.prepend(genCover(entry)); };
     cov.appendChild(img);
   } else cov.appendChild(genCover(entry));
+  const cardRb = reviewBadge(entry, true);
+  if (cardRb) cov.appendChild(cardRb);
   box.appendChild(cov);
 
   const meta = document.createElement('div');
