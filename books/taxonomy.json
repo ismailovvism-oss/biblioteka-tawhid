@@ -1,0 +1,37 @@
+{
+  "categories": [
+    { "id": "aqida",   "name": "Акъида",                 "hue": 28 },
+    { "id": "aqida-tawhid",     "name": "Таухид",         "parent": "aqida", "shade": 0 },
+    { "id": "aqida-iman-kufr",  "name": "Иман и куфр",    "parent": "aqida", "shade": 1 },
+
+    { "id": "quran",   "name": "Коран и его науки",       "hue": 145 },
+    { "id": "quran-tafsir",     "name": "Тафсир",             "parent": "quran", "shade": 0 },
+    { "id": "quran-sciences",   "name": "Коранические науки", "parent": "quran", "shade": 1 },
+
+    { "id": "hadith",  "name": "Хадисы и его науки",      "hue": 205 },
+    { "id": "hadith-collections", "name": "Хадисы",       "parent": "hadith", "shade": 0 },
+    { "id": "hadith-sharh",       "name": "Шархи",        "parent": "hadith", "shade": 1 },
+    { "id": "hadith-mustalah",    "name": "Хадисоведение","parent": "hadith", "shade": 2 },
+
+    { "id": "fiqh",    "name": "Фикх и усуль",            "hue": 265 },
+    { "id": "fiqh-usul",     "name": "Усуль аль-фикх",       "parent": "fiqh", "shade": 0 },
+    { "id": "fiqh-ibadat",   "name": "Ибадат",               "parent": "fiqh", "shade": 1 },
+    { "id": "fiqh-muamalat", "name": "Муамалят",             "parent": "fiqh", "shade": 2 },
+    { "id": "fiqh-nikah",    "name": "Никах и семья",        "parent": "fiqh", "shade": 3 },
+    { "id": "fiqh-nawazil",  "name": "Современные вопросы",  "parent": "fiqh", "shade": 4 },
+
+    { "id": "history", "name": "История и секты",         "hue": 350 },
+    { "id": "history-sira",    "name": "Сира",             "parent": "history", "shade": 0 },
+    { "id": "history-islamic", "name": "Исламская история","parent": "history", "shade": 1 },
+    { "id": "history-firaq",   "name": "Секты (фирак)",    "parent": "history", "shade": 2 },
+
+    { "id": "lang",    "name": "Языкознание и риторика",  "hue": 175 },
+    { "id": "lang-nahw",    "name": "Нахв и сарф", "parent": "lang", "shade": 0 },
+    { "id": "lang-balagha", "name": "Балага",      "parent": "lang", "shade": 1 },
+    { "id": "lang-dict",    "name": "Словари",     "parent": "lang", "shade": 2 },
+
+    { "id": "zuhd",    "name": "Зухд",                    "hue": 95 },
+
+    { "id": "misc",    "name": "Разное",                  "hue": 40 }
+  ]
+}

@@ -72,7 +72,9 @@ function setLast(id, data) {
 
 /* ===== состояние ===== */
 let library = [];         // авторский список книг (books/index.json)
-let catalogTree = [];     // объявленное дерево разделов (index.json "categories": [[путь]…]) — показываем даже пустые
+let catalogTree = [];     // пути-массивы всех узлов дерева (из taxonomy) — показываем даже пустые
+let taxNodes = [];        // дерево категорий: плоский список { id, name, parent?, hue?, shade? } (books/taxonomy.json)
+let taxById = new Map();  // id → узел
 let bookId = null;        // id выбранной книги
 let base = '';            // префикс путей книги: локальный путь или URL, с «/» на конце
 let book = null;          // манифест book.json
@@ -1495,8 +1497,32 @@ function entryFacetVals(e, key) {
   const v = e[key];
   return Array.isArray(v) ? v : (v ? [v] : []);
 }
+/* ===== дерево категорий (taxonomy.json, плоский список с parent) ===== */
+function buildTaxonomy() {
+  taxById = new Map(taxNodes.map(n => [n.id, n]));
+  catalogTree = taxNodes.map(n => catPathNames(n.id)); // пути-массивы имён (в т.ч. пустых узлов)
+}
+// цепочка узлов root→узел (с защитой от циклов)
+function catChain(id) {
+  const out = []; let n = taxById.get(id); const seen = new Set();
+  while (n && !seen.has(n.id)) { seen.add(n.id); out.unshift(n); n = n.parent ? taxById.get(n.parent) : null; }
+  return out;
+}
+function catPathNames(id) { return catChain(id).map(n => n.name); }
+// путь имён книги: новый формат — id (строка), старый — массив имён (на случай нестыковки)
+function bookCatPath(e) {
+  if (typeof e.category === 'string') return catPathNames(e.category);
+  if (Array.isArray(e.category)) return e.category;
+  return [];
+}
+// цвет узла: hue ближайшего L1-предка, shade ближайшего узла с shade; глубже наследуется
+function catColorOf(id) {
+  let hue = null, shade = 0;
+  for (const n of catChain(id)) { if (n.hue != null) hue = n.hue; if (n.shade != null) shade = n.shade; }
+  return { hue, shade };
+}
 function entryInCat(e, cat) {
-  const p = e.category || [];
+  const p = bookCatPath(e);
   return cat.every((seg, i) => p[i] === seg); // запись лежит в выбранной ветке (или глубже)
 }
 function entryMatchesFacets(e, facets) {
@@ -1569,7 +1595,7 @@ function renderLibrary() {
   // под-категории текущего уровня (с числом книг)
   const children = new Map();
   for (const e of underCat) {
-    const p = e.category || [];
+    const p = bookCatPath(e);
     if (p.length > cat.length) children.set(p[cat.length], (children.get(p[cat.length]) || 0) + 1);
   }
   // объявленные разделы (index.json "categories") — показываем даже без книг (· 0)
@@ -1872,7 +1898,12 @@ async function init() {
   try {
     const idx = JSON.parse(await fetchText('books/index.json'));
     library = Array.isArray(idx) ? idx : (idx.books || []);
-    catalogTree = (idx && Array.isArray(idx.categories)) ? idx.categories : [];
+    // дерево категорий — отдельный файл taxonomy.json (плоский список узлов с parent)
+    try {
+      const tax = JSON.parse(await fetchText('books/taxonomy.json'));
+      taxNodes = Array.isArray(tax.categories) ? tax.categories : [];
+    } catch { taxNodes = []; }
+    buildTaxonomy();
   } catch (err) {
     document.body.dataset.view = 'library';
     showLoadError('Не удалось загрузить список книг (books/index.json): ' + err.message);

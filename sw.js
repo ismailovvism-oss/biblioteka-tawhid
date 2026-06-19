@@ -10,7 +10,7 @@
  * Версию бампать при изменении оболочки — старый кеш чистится на activate.
  */
 
-const VERSION = 'chitalka-v26';
+const VERSION = 'chitalka-v27';
 const SHELL = [
   './',
   'index.html',
@@ -19,6 +19,7 @@ const SHELL = [
   'app.js',
   'manifest.webmanifest',
   'books/index.json',
+  'books/taxonomy.json',
   'icons/icon-192.png',
   'icons/icon-512.png',
 ];
