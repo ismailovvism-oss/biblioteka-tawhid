@@ -228,12 +228,9 @@ function buildChapter(texts, langs) {
     pair[orig] = o ? renderGroup(o) : null;
     if (trans) pair[trans] = t ? renderGroup(t) : null;
     pairs.push(pair);
-
-    // валидатор: рассинхрон секторов (только для двуязычной, не односторонней главы)
-    if (trans && !oneSided) {
-      if (o && !t) warnings.push(`сектор ${baseId}: есть в ${orig}, нет пары в ${trans}`);
-      if (t && !o) warnings.push(`сектор ${baseId}: есть в ${trans}, нет пары в ${orig} (страница неизвестна)`);
-    }
+    // непарные секторы — НЕ ошибка: гибридная модель намеренно их допускает
+    // (ru-only = проза во всю ширину, ar-only = оригинал с меткой «идёт перевод»);
+    // оба рендерятся корректно. Валидатор контракта их больше не метит.
   }
   if (oneSided) {
     const present = textCount(orig) > 0 ? orig : trans;

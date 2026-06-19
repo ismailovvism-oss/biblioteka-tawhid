@@ -72,6 +72,7 @@ function setLast(id, data) {
 
 /* ===== состояние ===== */
 let library = [];         // авторский список книг (books/index.json)
+let catalogTree = [];     // объявленное дерево разделов (index.json "categories": [[путь]…]) — показываем даже пустые
 let bookId = null;        // id выбранной книги
 let base = '';            // префикс путей книги: локальный путь или URL, с «/» на конце
 let book = null;          // манифест book.json
@@ -1444,23 +1445,34 @@ function genCover(e) {
 }
 
 /* фасеты библиотеки: ключ в записи index.json → подпись и формат значения */
-// статус доверия книги (одно значение): бейдж на обложке + фасет «Статус»
-const REVIEW = {
+// Две независимые оси у книги: ОДОБРЕНИЕ (review) и ГОТОВНОСТЬ (progress).
+// Книга может быть одновременно «одобрено» и «в работе». Каждая — свой бейдж и фасет.
+const APPROVAL = {
   approved: { label: 'Одобрено администрацией', short: 'Одобрено', icon: '✓', cls: 'review-approved' },
   caution:  { label: 'Осторожно, требует проверки', short: 'Требует проверки', icon: '⚠', cls: 'review-caution' },
-  draft:    { label: 'В работе', short: 'В работе', icon: '🚧', cls: 'review-draft' },
 };
-function reviewBadge(e, full) {
-  const r = e && e.review && REVIEW[e.review];
-  if (!r) return null;
+const PROGRESS = {
+  wip:   { label: 'В работе (недоработано)', short: 'В работе', icon: '🚧', cls: 'review-wip' },
+  ready: { label: 'Доработано', short: 'Готово', icon: '✔', cls: 'review-ready' },
+};
+function badgeEl(meta, full) {
   const b = document.createElement('span');
-  b.className = 'review-badge ' + r.cls;
-  b.textContent = full ? (r.icon + ' ' + r.short) : r.icon;
-  b.title = r.label;
+  b.className = 'review-badge ' + meta.cls;
+  b.textContent = full ? (meta.icon + ' ' + meta.short) : meta.icon;
+  b.title = meta.label;
   return b;
 }
+// добавить бейджи к обложке: одобрение (слева) + «в работе» (справа). «Готово»
+// бейджем не помечаем (это норма), но в фасете «Готовность» оно фильтруется.
+function applyBadges(host, e, full) {
+  const ap = e && e.review && APPROVAL[e.review];
+  if (ap) host.appendChild(badgeEl(ap, full));
+  if (e && e.progress === 'wip') host.appendChild(badgeEl(PROGRESS.wip, full));
+  else if (full && e && e.progress === 'ready') host.appendChild(badgeEl(PROGRESS.ready, full));
+}
 const FACETS = [
-  { key: 'review', label: 'Статус', fmt: v => (REVIEW[v] ? REVIEW[v].icon + ' ' + REVIEW[v].short : v) },
+  { key: 'review', label: 'Одобрение', fmt: v => (APPROVAL[v] ? APPROVAL[v].icon + ' ' + APPROVAL[v].short : v) },
+  { key: 'progress', label: 'Готовность', fmt: v => (PROGRESS[v] ? PROGRESS[v].icon + ' ' + PROGRESS[v].short : v) },
   { key: 'langs', label: 'Язык', fmt: v => langName(v) },
   { key: 'authors', label: 'Автор', fmt: v => v },
   { key: 'madhhab', label: 'Мазхаб', fmt: v => v },
@@ -1549,14 +1561,21 @@ function renderLibrary() {
     const p = e.category || [];
     if (p.length > cat.length) children.set(p[cat.length], (children.get(p[cat.length]) || 0) + 1);
   }
+  // объявленные разделы (index.json "categories") — показываем даже без книг (· 0)
+  for (const path of catalogTree) {
+    if (Array.isArray(path) && path.length > cat.length && cat.every((seg, i) => path[i] === seg)) {
+      const name = path[cat.length];
+      if (!children.has(name)) children.set(name, 0);
+    }
+  }
   if (children.size) {
     const row = document.createElement('div');
     row.className = 'chips';
     for (const [name, n] of [...children.entries()].sort((a, b) => a[0].localeCompare(b[0], 'ru'))) {
       const c = document.createElement('button');
       c.type = 'button';
-      c.className = 'chip cat-chip';
-      c.textContent = `${name} · ${n}`;
+      c.className = 'chip cat-chip' + (n ? '' : ' cat-empty');
+      c.textContent = n ? `${name} · ${n}` : name;
       c.addEventListener('click', () => { settings.shelfCat = [...cat, name]; saveSettings(); renderLibrary(); });
       row.appendChild(c);
     }
@@ -1631,8 +1650,7 @@ function renderLibrary() {
       note.textContent = l.page != null ? `стр. ${l.page}` : '⋯';
       btn.appendChild(note);
     }
-    const rb = reviewBadge(e, false);
-    if (rb) btn.appendChild(rb);
+    applyBadges(btn, e, false);
     btn.addEventListener('click', () => {
       history.pushState({}, '', '?info=' + encodeURIComponent(e.id));
       renderBookInfo(e);
@@ -1663,6 +1681,14 @@ async function renderBookInfo(entry) {
   $('#chapter-title').textContent = entryLabel(entry);
   stream.innerHTML = '';
 
+  // кнопка возврата к каталогу (на странице книги шапочного «домой» нет)
+  const back = document.createElement('button');
+  back.type = 'button';
+  back.className = 'bookinfo-back';
+  back.textContent = '← Все книги';
+  back.addEventListener('click', () => { history.pushState({}, '', location.pathname); renderLibrary(); });
+  stream.appendChild(back);
+
   // манифест книги — за автором, аннотацией и числом глав
   let manifest = null;
   const baseUrl = entry.base.endsWith('/') ? entry.base : entry.base + '/';
@@ -1680,8 +1706,7 @@ async function renderBookInfo(entry) {
     img.onerror = () => { img.remove(); cov.prepend(genCover(entry)); };
     cov.appendChild(img);
   } else cov.appendChild(genCover(entry));
-  const cardRb = reviewBadge(entry, true);
-  if (cardRb) cov.appendChild(cardRb);
+  applyBadges(cov, entry, true);
   box.appendChild(cov);
 
   const meta = document.createElement('div');
@@ -1836,6 +1861,7 @@ async function init() {
   try {
     const idx = JSON.parse(await fetchText('books/index.json'));
     library = Array.isArray(idx) ? idx : (idx.books || []);
+    catalogTree = (idx && Array.isArray(idx.categories)) ? idx.categories : [];
   } catch (err) {
     document.body.dataset.view = 'library';
     showLoadError('Не удалось загрузить список книг (books/index.json): ' + err.message);

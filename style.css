@@ -604,6 +604,7 @@ mark.hl {
 .crumb.active { color: var(--fg); font-weight: bold; cursor: default; }
 .crumb-sep { color: var(--muted); }
 .cat-chip { font-weight: 600; }
+.cat-chip.cat-empty { font-weight: 500; opacity: 0.55; border-style: dashed; }
 .facet { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem; margin: 0.35rem 0; }
 .facet-label { color: var(--muted); font-size: 0.8rem; min-width: 3.2rem; }
 .facet-reset { margin: 0.3rem 0 0.2rem; color: var(--muted); font-size: 0.85rem; }
@@ -693,14 +694,32 @@ mark.hl {
   color: #fff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
-.review-approved { background: #3f8f54; }
+.review-approved { background: #3f8f54; }   /* одобрение — слева */
 .review-caution  { background: #c9821e; }
-.review-draft    { background: #6f6f68; }
+/* готовность — справа, чтобы не наезжать на бейдж одобрения */
+.review-wip, .review-ready { left: auto; right: 4px; }
+.review-wip   { background: #6f6f68; }
+.review-ready { background: #3f8f54; }
 .bookinfo-cover .review-badge { font-size: 0.74rem; }
 
 /* карточка книги */
+.bookinfo-back {
+  display: block;
+  margin: 0.8rem auto 0;
+  max-width: 46rem;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--accent, #b07a2c);
+  font: inherit;
+  font-size: 0.95rem;
+  cursor: pointer;
+  padding: 0.3rem 0;
+}
+.bookinfo-back:hover { text-decoration: underline; }
 .bookinfo {
-  margin: 1.2rem auto 0;
+  margin: 0.4rem auto 0;
   max-width: 46rem;
   display: flex;
   gap: 1.2rem;
