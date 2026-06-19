@@ -209,12 +209,6 @@ function buildChapter(texts, langs) {
     }
   }
 
-  // если глава целиком односторонняя (один язык не содержит ни одного текст-сектора),
-  // это не рассинхрон, а ещё не подключённый язык — не сорим пер-секторными варнингами
-  const textCount = lang => [...(maps[lang]?.values() || [])].filter(g => g.type === 'text').length;
-  const oneSided = trans && maps[trans] && (textCount(orig) === 0 || textCount(trans) === 0)
-    && (textCount(orig) > 0 || textCount(trans) > 0);
-
   const pairs = [];
   for (const baseId of order) {
     const o = maps[orig].get(baseId) || null;
@@ -232,10 +226,8 @@ function buildChapter(texts, langs) {
     // (ru-only = проза во всю ширину, ar-only = оригинал с меткой «идёт перевод»);
     // оба рендерятся корректно. Валидатор контракта их больше не метит.
   }
-  if (oneSided) {
-    const present = textCount(orig) > 0 ? orig : trans;
-    warnings.push(`глава целиком только в ${present} — второй язык ещё не подключён`);
-  }
+  // глава целиком на одном языке (вступление, ru-only проза) — тоже норма гибрида,
+  // не предупреждаем: читателю это не ошибка.
 
   // ── сноски: пер-язычные, без кросс-спаривания. Авторские (цитаты, в ar) и
   //    переводческие (пояснения терминов, только в ru) — разной природы и числа;

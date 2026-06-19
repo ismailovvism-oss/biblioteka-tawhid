@@ -765,7 +765,8 @@ $('#img-overlay').addEventListener('click', e => {
 /* ===== панель валидатора ===== */
 function renderDebug() {
   const btn = $('#btn-warn');
-  btn.hidden = warnings.length === 0;
+  // значок валидатора — инструмент автора, не для читателя: только в debug и при варнингах
+  btn.hidden = !settings.debug || warnings.length === 0;
   btn.textContent = `⚠ ${warnings.length}`;
   const panel = $('#debug-panel');
   panel.innerHTML = '';
