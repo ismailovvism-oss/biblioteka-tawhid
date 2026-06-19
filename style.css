@@ -107,6 +107,16 @@ body[data-view="library"] #progress { display: none; }
 #btn-warn { color: var(--error); font-size: 0.85rem; }
 #page-indicator { color: var(--muted); font-size: 0.92rem; }
 #btn-scan { color: var(--accent); font-size: 0.92rem; }
+/* стрелки переходов между разделами — крупнее и чётче */
+#btn-prev, #btn-next {
+  font-size: 1.6rem;
+  line-height: 1;
+  font-weight: 700;
+  color: var(--accent);
+  padding: 0.1rem 0.7rem;
+}
+#btn-prev:active, #btn-next:active { background: var(--accent-soft); }
+.nav-hidden { visibility: hidden; pointer-events: none; }
 
 /* ===== поток пар ===== */
 #stream {

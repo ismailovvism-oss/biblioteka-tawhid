@@ -135,8 +135,16 @@ function scrollToPair(id, smooth) {
 }
 
 let loading = false; // глава грузится/перерисовывается — не сохранять промежуточную позицию
+// стрелки разделов: прячем ‹ на первой главе и › на последней (видимость, чтобы
+// индикатор страницы не съезжал)
+function updateChapterNav() {
+  const last = book ? book.chapters.length - 1 : 0;
+  $('#btn-prev').classList.toggle('nav-hidden', !book || chapterIndex <= 0);
+  $('#btn-next').classList.toggle('nav-hidden', !book || chapterIndex >= last);
+}
 async function loadChapter(i, targetId) {
   chapterIndex = i;
+  updateChapterNav();
   loading = true;
   $('#chapter-title').textContent = 'Загрузка…';
   try {
