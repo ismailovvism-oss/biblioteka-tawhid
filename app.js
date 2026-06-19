@@ -107,7 +107,9 @@ async function loadChapterData(i) {
   if (!chapterCache.has(key)) {
     const texts = {};
     await Promise.all(book.languages.map(async lang => {
-      texts[lang] = await fetchText(`${base}${lang}/${file}`);
+      // нет файла для языка (гибрид: глава только на одном языке) — не падаем, пусто
+      try { texts[lang] = await fetchText(`${base}${lang}/${file}`); }
+      catch { texts[lang] = ''; }
     }));
     chapterCache.set(key, buildChapter(texts, book.languages));
   }
@@ -335,8 +337,11 @@ function currentPage() {
 
 function updatePageIndicator() {
   const p = currentPage();
-  const pg = p != null ? 'стр. ' + p : 'стр. —';
-  $('#page-indicator').textContent = book ? `${pg} · ${bookPct}%` : pg;
+  // нет маркера страницы (статьи, главы без <!-- pN -->) — не показываем «стр. —»
+  const pg = p != null ? 'стр. ' + p : null;
+  $('#page-indicator').textContent = book
+    ? (pg ? `${pg} · ${bookPct}%` : `${bookPct}%`)
+    : (pg || '');
   $('#btn-scan').hidden = !(book && book.hasImages && p != null);
 }
 
@@ -763,16 +768,12 @@ function renderDebug() {
   btn.hidden = warnings.length === 0;
   btn.textContent = `⚠ ${warnings.length}`;
   const panel = $('#debug-panel');
-  panel.hidden = !settings.debug;
   panel.innerHTML = '';
-  if (!settings.debug) return;
+  // панель валидатора — только в debug И только когда есть что показать
+  // (зелёную «ошибок не найдено» не рисуем — она лишь занимала место)
+  if (!settings.debug || !warnings.length) { panel.hidden = true; return; }
+  panel.hidden = false;
   const head = document.createElement('div');
-  if (!warnings.length) {
-    head.className = 'ok';
-    head.textContent = 'Контракт: ошибок не найдено ✓';
-    panel.appendChild(head);
-    return;
-  }
   head.className = 'bad';
   head.textContent = `Ошибки контракта (${warnings.length}):`;
   panel.appendChild(head);
@@ -1301,7 +1302,8 @@ async function searchChapter(entry, m, ci) {
   if (!searchChapters.has(key)) {
     const texts = {};
     await Promise.all(m.languages.map(async lang => {
-      texts[lang] = await fetchText(`${m._base}${lang}/${m.chapters[ci].file}`);
+      try { texts[lang] = await fetchText(`${m._base}${lang}/${m.chapters[ci].file}`); }
+      catch { texts[lang] = ''; }
     }));
     searchChapters.set(key, buildChapter(texts, m.languages));
   }
