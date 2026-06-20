@@ -393,6 +393,14 @@ body[data-layout="h"][data-colrtl] .pair > .member[dir="rtl"] {
 }
 #toc-list .toc-title { flex: 1; min-width: 0; }
 #toc-list .toc-pages { flex: none; color: var(--muted); font-size: 0.8rem; white-space: nowrap; }
+/* иерархия глав: дерево по level */
+#toc-list li.toc-li { display: flex; align-items: baseline; }
+#toc-list .toc-twist { flex: 0 0 auto; width: 1.4rem; padding: 0.6rem 0; background: none; border: none; color: var(--muted); font-size: 0.75rem; text-align: center; cursor: pointer; }
+#toc-list .toc-twist.leaf { visibility: hidden; cursor: default; }
+#toc-list .toc-link { flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; gap: 0.6rem; width: auto; padding: 0.6rem 0.2rem; background: none; border: none; color: inherit; cursor: pointer; text-align: start; font: inherit; }
+#toc-list li.current .toc-link { color: var(--accent); font-weight: bold; }
+#toc-list .toc-grouptitle { flex: 1 1 auto; padding: 0.6rem 0.2rem; font-weight: 700; }
+#toc-list li.toc-header { background: var(--accent-soft); }
 
 @media (min-width: 600px) {
   .overlay { align-items: center; justify-content: center; }

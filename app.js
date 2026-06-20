@@ -140,11 +140,15 @@ let loading = false; // глава грузится/перерисовывает
 // стрелки разделов: прячем ‹ на первой главе и › на последней (видимость, чтобы
 // индикатор страницы не съезжал)
 function updateChapterNav() {
-  const last = book ? book.chapters.length - 1 : 0;
-  $('#btn-prev').classList.toggle('nav-hidden', !book || chapterIndex <= 0);
-  $('#btn-next').classList.toggle('nav-hidden', !book || chapterIndex >= last);
+  $('#btn-prev').classList.toggle('nav-hidden', !book || nextReadable(chapterIndex, -1) < 0);
+  $('#btn-next').classList.toggle('nav-hidden', !book || nextReadable(chapterIndex, 1) < 0);
 }
 async function loadChapter(i, targetId) {
+  // запись-группа (без файла) не читается — перейти к ближайшей читаемой
+  if (book.chapters[i] && !chHasFile(book.chapters[i])) {
+    const r = nextReadable(i, 1); i = r >= 0 ? r : nextReadable(i, -1);
+    if (i < 0) return;
+  }
   chapterIndex = i;
   updateChapterNav();
   loading = true;
@@ -455,25 +459,74 @@ function flash(el) {
 
 /* ===== навигация: оглавление, главы, страницы ===== */
 let tocRangesFilled = false;
+// заголовок главы/группы для оглавления: в режиме одного языка — этот язык,
+// иначе двуязычно (важно для групп-заголовков {ar,ru})
+function tocTitle(t) {
+  if (!t) return '';
+  const v = visibleLang();
+  if (v !== 'both' && t[v]) return t[v];
+  return pickTitle(t);
+}
+function chHasFile(ch) { return !!(ch && ch.file); }            // header-запись — без file
+function chLevel(ch) { return Math.max(0, Math.min(3, (ch && ch.level) | 0)); }
+// глава является группой, если следующая запись глубже неё
+function isTocGroup(i) {
+  const next = book.chapters[i + 1];
+  return !!next && chLevel(next) > chLevel(book.chapters[i]);
+}
+// ближайшая читаемая (с файлом) глава в направлении dir, пропуская header-записи
+function nextReadable(from, dir) {
+  for (let i = from + dir; i >= 0 && i < book.chapters.length; i += dir)
+    if (chHasFile(book.chapters[i])) return i;
+  return -1;
+}
+let tocCollapsed = new Set();   // индексы свёрнутых групп текущей книги
 function buildToc() {
+  tocCollapsed = new Set();
   $('#toc-book-title').textContent = pickTitle(book.title);
+  tocRangesFilled = false;
+  renderTocList();
+}
+function renderTocList() {
   const ul = $('#toc-list');
   ul.innerHTML = '';
-  tocRangesFilled = false;
+  let hideBelow = Infinity;
   book.chapters.forEach((ch, i) => {
+    const lvl = chLevel(ch);
+    if (lvl > hideBelow) return;            // внутри свёрнутой группы — скрыта
+    hideBelow = Infinity;
+    const group = isTocGroup(i);
+    const collapsed = group && tocCollapsed.has(i);
+    if (collapsed) hideBelow = lvl;         // прятать глубже до уровня ≤ lvl
     const li = document.createElement('li');
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    const title = document.createElement('span');
-    title.className = 'toc-title';
-    title.textContent = pickTitle(ch.title);
-    const pages = document.createElement('span');
-    pages.className = 'toc-pages';
-    btn.append(title, pages);
-    btn.addEventListener('click', () => { $('#toc').hidden = true; consumeOverlayMark(); loadChapter(i); });
-    li.appendChild(btn);
+    li.className = 'toc-li toc-l' + lvl + (chHasFile(ch) ? '' : ' toc-header');
+    li.dataset.ci = i;
+    li.style.paddingInlineStart = (0.3 + lvl * 0.9) + 'rem';
+    const tw = document.createElement('button');
+    tw.type = 'button';
+    tw.className = 'toc-twist' + (group ? '' : ' leaf');
+    tw.textContent = group ? (collapsed ? '▸' : '▾') : '';
+    if (group) tw.addEventListener('click', e => {
+      e.stopPropagation();
+      tocCollapsed.has(i) ? tocCollapsed.delete(i) : tocCollapsed.add(i);
+      renderTocList();
+    });
+    li.appendChild(tw);
+    if (chHasFile(ch)) {
+      const btn = document.createElement('button');
+      btn.type = 'button'; btn.className = 'toc-link';
+      const title = document.createElement('span'); title.className = 'toc-title'; title.textContent = tocTitle(ch.title);
+      const pages = document.createElement('span'); pages.className = 'toc-pages'; pages.dataset.ci = i;
+      btn.append(title, pages);
+      btn.addEventListener('click', () => { $('#toc').hidden = true; consumeOverlayMark(); loadChapter(i); });
+      li.appendChild(btn);
+    } else {
+      const hd = document.createElement('span'); hd.className = 'toc-grouptitle'; hd.textContent = tocTitle(ch.title);
+      li.appendChild(hd);
+    }
     ul.appendChild(li);
   });
+  markTocCurrent();
 }
 
 // диапазоны страниц по главам считаем лениво (грузим главы фоном при первом открытии TOC)
@@ -481,8 +534,10 @@ async function fillPageRanges() {
   if (tocRangesFilled || !book) return;
   tocRangesFilled = true;
   const myBook = bookId;
-  const items = $('#toc-list').querySelectorAll('.toc-pages');
+  const items = {};
+  $('#toc-list').querySelectorAll('.toc-pages').forEach(el => { items[el.dataset.ci] = el; });
   for (let i = 0; i < book.chapters.length; i++) {
+    if (!chHasFile(book.chapters[i])) continue;   // группы-заголовки без файла
     let data;
     try { data = await loadChapterData(i); } catch { continue; }
     if (myBook !== bookId) { tocRangesFilled = false; return; } // книгу сменили
@@ -494,8 +549,8 @@ async function fillPageRanges() {
 }
 
 function markTocCurrent() {
-  document.querySelectorAll('#toc-list li').forEach((li, i) => {
-    li.classList.toggle('current', i === chapterIndex);
+  document.querySelectorAll('#toc-list li').forEach(li => {
+    li.classList.toggle('current', Number(li.dataset.ci) === chapterIndex);
   });
 }
 
@@ -1136,10 +1191,8 @@ document.querySelectorAll('.overlay').forEach(ov => {
   ov.addEventListener('click', e => { if (e.target === ov) { ov.hidden = true; consumeOverlayMark(); } });
 });
 $('#btn-vis').addEventListener('click', () => { if (book) cycleVisibility(); });
-$('#btn-prev').addEventListener('click', () => { if (chapterIndex > 0) loadChapter(chapterIndex - 1); });
-$('#btn-next').addEventListener('click', () => {
-  if (book && chapterIndex < book.chapters.length - 1) loadChapter(chapterIndex + 1);
-});
+$('#btn-prev').addEventListener('click', () => { const p = book && nextReadable(chapterIndex, -1); if (p >= 0) loadChapter(p); });
+$('#btn-next').addEventListener('click', () => { const n = book && nextReadable(chapterIndex, 1); if (n >= 0) loadChapter(n); });
 $('#page-indicator').addEventListener('click', () => {
   const p = $('#page-popover');
   p.hidden = !p.hidden;
@@ -1171,9 +1224,9 @@ document.addEventListener('keydown', e => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (document.body.dataset.view !== 'reading' || !book || anyPopupOpen()) return;
   if (e.key === 'ArrowRight') {
-    if (chapterIndex < book.chapters.length - 1) { loadChapter(chapterIndex + 1); e.preventDefault(); }
+    const n = nextReadable(chapterIndex, 1); if (n >= 0) { loadChapter(n); e.preventDefault(); }
   } else if (e.key === 'ArrowLeft') {
-    if (chapterIndex > 0) { loadChapter(chapterIndex - 1); e.preventDefault(); }
+    const p = nextReadable(chapterIndex, -1); if (p >= 0) { loadChapter(p); e.preventDefault(); }
   }
 });
 
@@ -1192,8 +1245,8 @@ document.addEventListener('touchend', e => {
   swipeX = null;
   if (document.body.dataset.view !== 'reading' || !book || anyPopupOpen()) return;
   if (dt > 600 || Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 2) return; // не горизонтальный свайп
-  if (dx < 0) { if (chapterIndex < book.chapters.length - 1) loadChapter(chapterIndex + 1); }
-  else { if (chapterIndex > 0) loadChapter(chapterIndex - 1); }
+  if (dx < 0) { const n = nextReadable(chapterIndex, 1); if (n >= 0) loadChapter(n); }
+  else { const p = nextReadable(chapterIndex, -1); if (p >= 0) loadChapter(p); }
 }, { passive: true });
 
 /* ===== поиск по книге ===== */
