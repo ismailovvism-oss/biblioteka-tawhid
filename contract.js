@@ -31,6 +31,12 @@ function delinkWiki(s) {
  */
 const PAGE_RE = /^<!--\s*(?:ص|p)\s*:?\s*([0-9٠-٩]+)\s*-->$/;
 const SECTOR_RE = /^<!--\s*(s\d+)[a-z]?\s*-->$/i; // существующий якорь сектора (гибрид)
+/*
+ * Строка-картинка. Зеркало IMG_RE из parser.js — держать в синхроне при изменении
+ * разметки. Здесь она нужна НЕ для рендера (это дело parser.js), а только чтобы
+ * посчитать секторы-картинки для диагностики паритета (см. parityHint).
+ */
+const IMG_LINE_RE = /^!\[[^\]]*\]\([^)\s]+\)$/;
 const toWesternDigits = s => s.replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x0660));
 const isDef = l => /^\s*\[\^[^\]]+\]:/.test(l);
 
@@ -217,10 +223,37 @@ function convert(body, { dropArabic = false, label = '' } = {}) {
     out.push('');
   }
   const content = out.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
-  return { content, sectors: sectors.length, anchored, droppedAyat, droppedOther, warnings };
+  // секторы, состоящие только из картинки — для диагностики паритета (см. parityHint)
+  const imageOnly = sectors.filter(sec => {
+    const ls = sec.parts.reduce((acc, p) => acc.concat(p), []).filter(l => l.trim());
+    return ls.length > 0 && ls.every(l => IMG_LINE_RE.test(l));
+  }).length;
+  return { content, sectors: sectors.length, anchored, imageOnly, droppedAyat, droppedOther, warnings };
+}
+
+/*
+ * Подсказка, когда посекторный паритет ar↔ru разошёлся.
+ *
+ * Частая и совершенно неочевидная причина — картинка, поставленная ОТДЕЛЬНЫМ абзацем
+ * (пустая строка вокруг): для конвертера это лишний сектор, счёт расходится, и сторона
+ * целиком уезжает в заглушку. Автор при этом видит только «нет паритета: 1» и не может
+ * догадаться, что виновата картинка. Прицепленная к абзацу (без пустой строки) картинка
+ * живёт внутри существующего сектора и паритет не трогает.
+ *
+ * Возвращает строку-подсказку или null, если картинки разницу не объясняют.
+ */
+function parityHint(orig, trans) {
+  const d = (trans.sectors || 0) - (orig.sectors || 0);
+  if (!d) return null;
+  const di = (trans.imageOnly || 0) - (orig.imageOnly || 0);
+  const advice = 'прицепи ![…](…) к соседнему абзацу — без пустой строки перед картинкой';
+  const whole = n => Math.abs(n) === Math.abs(d) ? ' — это объясняет всю разницу' : '';
+  if (d > 0 && di > 0) return `в переводе картинок отдельным абзацем на ${di} больше, чем в оригинале; каждая такая — лишний сектор${whole(di)}. Либо ${advice}, либо поставь парную картинку в оригинал.`;
+  if (d < 0 && di < 0) return `в оригинале картинок отдельным абзацем на ${-di} больше, чем в переводе; каждая такая — лишний сектор${whole(di)}. Либо ${advice}, либо поставь парную картинку в перевод.`;
+  return null;
 }
 
 // Node — require; браузер — глобал window.Contract (см. шапку: файл двусредный)
-const API = { parseBody, convert, delinkWiki, isArabicLine, numberFootnotes, stripFrontmatter, renumber };
+const API = { parseBody, convert, parityHint, delinkWiki, isArabicLine, numberFootnotes, stripFrontmatter, renumber };
 if (typeof module !== 'undefined' && module.exports) module.exports = API;
 else if (typeof window !== 'undefined') window.Contract = API;

@@ -20,7 +20,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { convert, stripFrontmatter } = require(path.join(__dirname, '..', 'contract.js'));
+const { convert, stripFrontmatter, parityHint } = require(path.join(__dirname, '..', 'contract.js'));
 
 const SRC = process.argv[2] || '/tmp/tam-book';
 const ROOT = path.resolve(__dirname, '..');
@@ -75,7 +75,11 @@ function main() {
     } else {
       fs.writeFileSync(path.join(OUT, 'ar', file),
         '<!-- арабский оригинал этой главы ещё не выровнен посекторно (паритет правится в Вычитке) -->\n');
-      mismatches.push(`${file}: ar=${ar.sectors} ru=${ru.sectors} (Δ${ru.sectors - ar.sectors})`);
+      // картинка отдельным абзацем — лишний сектор; сама по себе разница «Δ1» этого
+      // не подсказывает, поэтому объясняем прямо
+      const hint = parityHint(ar, ru);
+      mismatches.push(`${file}: ar=${ar.sectors} ru=${ru.sectors} (Δ${ru.sectors - ar.sectors})`
+        + (hint ? `\n      ↳ ${hint}` : ''));
     }
     chapters.push({ file, title: { ru: tr.title || file.replace(/\.md$/, '') } });
   }
