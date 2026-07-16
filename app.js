@@ -1871,10 +1871,10 @@ function renderLibrary() {
   } else {
     renderBookList(shown, view);
   }
-  // подпись внизу полки: чья это библиотека
+  // подпись внизу полки (почта — только в «О приложении», не на главной)
   const brand = document.createElement('div');
   brand.className = 'brand';
-  brand.innerHTML = 'Библиотека Таухид · <a href="mailto:qaadiy@gmail.com">qaadiy@gmail.com</a>';
+  brand.textContent = 'Библиотека Таухид';
   stream.appendChild(brand);
   window.scrollTo(0, 0);
 }
