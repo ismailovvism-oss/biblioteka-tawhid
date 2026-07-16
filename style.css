@@ -177,6 +177,19 @@ body[data-align="justify"] .member p { text-align: justify; }
 .member .callout-warning, .member .callout-important { border-inline-start-color: #c9821e; }
 .member .callout-danger, .member .callout-failure { border-inline-start-color: var(--error); }
 .member .callout-success { border-inline-start-color: #3f8f54; }
+/* иллюстрация в тексте: ![подпись](media/…) — график, схема, пояснение.
+   Тап по картинке → полноэкранный просмотр (тот же, что у сканов страниц). */
+.member .fig { margin: 0.7em 0; text-align: center; }
+.member .fig img {
+  max-width: 100%; height: auto; border-radius: 6px;
+  border: 1px solid var(--border); cursor: zoom-in;
+  /* схемы часто рисуют на белом — в тёмной теме такая картинка слепит */
+  background: #fff;
+}
+.member .fig figcaption {
+  margin-top: 0.35em; font-size: 0.85em; color: var(--muted);
+  text-align: center; line-height: 1.35;
+}
 /* сворачиваемые callout’ы: [!тип]+ (раскрыт) / [!тип]- (свёрнут) */
 .member details.callout-foldable > summary.callout-title {
   cursor: pointer; list-style: none; user-select: none;

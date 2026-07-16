@@ -113,7 +113,8 @@ async function loadChapterData(i) {
       try { texts[lang] = await fetchText(`${base}${lang}/${file}`); }
       catch { texts[lang] = ''; }
     }));
-    chapterCache.set(key, buildChapter(texts, book.languages));
+    // base — чтобы ![](media/…) в секторе резолвился от папки книги, как и сканы
+    chapterCache.set(key, buildChapter(texts, book.languages, { base }));
   }
   return chapterCache.get(key);
 }
@@ -385,6 +386,9 @@ stream.addEventListener('click', e => {
   }
   const back = e.target.closest('.fn-back');
   if (back) { returnFromFn(back); return; }
+  // иллюстрация в тексте → тот же полноэкранный просмотр, что у сканов
+  const figImg = e.target.closest('.fig img');
+  if (figImg) { showImage(figImg.currentSrc || figImg.src); return; }
   const hl = e.target.closest('mark.hl');
   if (hl && window.getSelection().isCollapsed) { removeHighlight(hl.dataset.ts); return; }
   // одноязычный режим: тап по паре раскрывает/прячет второй язык (не мешаем выделению)
@@ -811,14 +815,21 @@ function toast(msg) {
   setTimeout(() => t.remove(), 2500);
 }
 
-/* ===== скан страницы ===== */
+/* ===== скан страницы / иллюстрация ===== */
+// один полноэкранный просмотр на оба случая: скан целой страницы и картинка в тексте
+// (тап по фигуре). Заодно бесплатно достаются Esc и системная «назад» — они уже
+// навешены на #img-overlay через openOverlay.
+function showImage(src) {
+  const img = $('#img-scan');
+  img.src = src;
+  img.classList.remove('zoom');
+  openOverlay($('#img-overlay'));
+}
+
 function openScan() {
   const p = currentPage();
   if (p == null || !book.hasImages) return;
-  const img = $('#img-scan');
-  img.src = base + book.imagePattern.replace('{page}', p);
-  img.classList.remove('zoom');
-  openOverlay($('#img-overlay'));
+  showImage(base + book.imagePattern.replace('{page}', p));
 }
 
 $('#btn-scan').addEventListener('click', openScan);

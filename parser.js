@@ -27,6 +27,32 @@ function inlineMd(text) {
   return h;
 }
 
+/*
+ * Иллюстрация в тексте: строка целиком из ![подпись](media/схема.png) — блок-картинка
+ * (график, схема, пояснение). Своя на каждый язык: секторы пер-язычные, значит в ar/
+ * своя разметка, в ru/ своя, и подпись переводится. Один и тот же файл в обоих языках —
+ * просто одна и та же ссылка, дублей на диске нет.
+ *
+ * Путь — от базы книги (`books/<id>/`), как и imagePattern сканов. Папка — media/,
+ * НЕ img/: в img/ у Тауфика лежат сканы целых страниц (p1.jpg), мешать нельзя.
+ * Инлайн-картинок внутри абзаца намеренно нет — для схем это блок.
+ */
+const IMG_RE = /^!\[([^\]]*)\]\(([^)\s]+)\)$/;
+const INLINE_IMG_RE = /!\[[^\]]*\]\([^)\s]+\)/; // та же разметка, но не отдельной строкой
+
+/*
+ * Пускаем только относительный путь внутрь книги. Отсекаем схему (javascript:, data:,
+ * http:), протокол-относительный //, абсолютный / и выход вверх через ".." — иначе
+ * ![](javascript:…) или ![](../../чужое) прошли бы в src как есть.
+ */
+function safeImgSrc(s) {
+  if (!s) return false;
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(s)) return false; // схема
+  if (s.startsWith('//') || s.startsWith('/')) return false;
+  if (s.split('/').includes('..')) return false;
+  return true;
+}
+
 /* Заголовок callout по типу, если автор не задал свой (для [!quote] и т. п.). */
 const CALLOUT_LABELS = {
   quote: 'Цитата', note: 'Примечание', info: 'Инфо', tip: 'Совет',
@@ -41,13 +67,24 @@ const CALLOUT_LABELS = {
  * содержать вложенные блоки. Тип callout произвольный — неизвестный получает
  * дефолтный стиль (.callout-<тип>), так что набор типов не захардкожен.
  */
-function renderBlocks(lines) {
+function renderBlocks(lines, base) {
+  base = base || '';
   const isQuote = l => /^>\s?/.test(l);
   const isUl = l => /^[-*]\s+/.test(l);
   const isOl = l => /^\d+\.\s+/.test(l);
   const out = [];
   let i = 0;
   while (i < lines.length) {
+    // строка целиком из ![подпись](путь) → <figure>. Подпись необязательна.
+    const im = lines[i].match(IMG_RE);
+    if (im && safeImgSrc(im[2])) {
+      const alt = im[1];
+      const cap = alt.trim() ? '<figcaption>' + inlineMd(alt) + '</figcaption>' : '';
+      out.push('<figure class="fig"><img src="' + escapeHtml(base + im[2]) + '"'
+        + ' alt="' + escapeHtml(alt) + '" loading="lazy">' + cap + '</figure>');
+      i++;
+      continue;
+    }
     if (isQuote(lines[i])) {
       const run = [];
       while (i < lines.length && isQuote(lines[i])) { run.push(lines[i].replace(/^>\s?/, '')); i++; }
@@ -58,7 +95,7 @@ function renderBlocks(lines) {
         const fold = m[2];   // '+' раскрыт, '-' свёрнут, '' не сворачивается
         const title = (m[3] || '').trim() || CALLOUT_LABELS[type] || (type[0].toUpperCase() + type.slice(1));
         const body = run.slice(1);
-        const bodyHtml = body.length ? '<div class="callout-body">' + renderBlocks(body).join('') + '</div>' : '';
+        const bodyHtml = body.length ? '<div class="callout-body">' + renderBlocks(body, base).join('') + '</div>' : '';
         if (fold) {
           out.push('<details class="callout callout-' + type + ' callout-foldable"' + (fold === '+' ? ' open' : '') + '>'
             + '<summary class="callout-title">' + inlineMd(title) + '</summary>'
@@ -69,7 +106,7 @@ function renderBlocks(lines) {
             + bodyHtml + '</div>');
         }
       } else {
-        out.push('<blockquote>' + renderBlocks(run).join('') + '</blockquote>');
+        out.push('<blockquote>' + renderBlocks(run, base).join('') + '</blockquote>');
       }
       continue;
     }
@@ -84,7 +121,10 @@ function renderBlocks(lines) {
       continue;
     }
     const run = [];
-    while (i < lines.length && !isQuote(lines[i]) && !isUl(lines[i]) && !isOl(lines[i])) { run.push(lines[i]); i++; }
+    // прогон абзаца обрывается и на картинке — иначе «Вот схема:» + ![](…) на следующей
+    // строке склеились бы в один <p> и разметка осталась бы голым текстом
+    while (i < lines.length && !isQuote(lines[i]) && !isUl(lines[i]) && !isOl(lines[i])
+           && !(IMG_RE.test(lines[i]) && safeImgSrc(lines[i].match(IMG_RE)[2]))) { run.push(lines[i]); i++; }
     out.push('<p>' + inlineMd(run.join('\n')) + '</p>');
   }
   return out;
@@ -150,10 +190,10 @@ function parseFile(md) {
 }
 
 /* Склейка группы (s050a + s050b) в один html-блок. */
-function renderGroup(group) {
+function renderGroup(group, base) {
   const out = [];
   for (const part of group.parts) {
-    for (const para of part.paras) out.push(...renderBlocks(para.split('\n')));
+    for (const para of part.paras) out.push(...renderBlocks(para.split('\n'), base));
   }
   return out.join('');
 }
@@ -163,10 +203,13 @@ function renderGroup(group) {
  * texts — { ar: "...", ru: "..." }, langs — manifest.languages,
  * первый язык считается оригиналом (источник страниц).
  */
-function buildChapter(texts, langs) {
+function buildChapter(texts, langs, opts) {
   const orig = langs[0];
   const trans = langs[1];
   const warnings = [];
+  // база книги для путей картинок (books/<id>/); валидатор зовёт без неё — пути остаются
+  // относительными, ему они и нужны такими для проверки существования файла
+  const base = (opts && opts.base) || '';
 
   // группировка по базовому id в пределах языка
   const maps = {};
@@ -178,7 +221,7 @@ function buildChapter(texts, langs) {
       seenIds.add(it.id);
       let g = map.get(it.baseId);
       if (!g) {
-        g = { baseId: it.baseId, type: it.type, page: it.page, parts: [], refs: [] };
+        g = { baseId: it.baseId, type: it.type, page: it.page, parts: [], refs: [], images: [] };
         map.set(it.baseId, g);
       }
       g.parts.push(it);
@@ -187,6 +230,26 @@ function buildChapter(texts, langs) {
         const re = /\[\^(\d+)\]/g;
         let m;
         while ((m = re.exec(para))) g.refs.push(m[1]);
+        // ссылки на картинки — валидатору, чтобы ловить битые пути до деплоя
+        for (const raw of para.split('\n')) {
+          // внутри цитаты/callout строка идёт с «> » — renderBlocks снимает его при
+          // рекурсии, картинка там рендерится штатно. Снимаем и здесь, иначе такая
+          // строка не совпала бы с IMG_RE и получила ложное «инлайн не поддержан».
+          const line = raw.replace(/^(?:>\s?)+/, '');
+          const im = line.match(IMG_RE);
+          if (im) {
+            // в список на проверку существования — только пути, которые вообще
+            // рендерятся; недопустимый отбит рендером и молча стал бы текстом
+            if (safeImgSrc(im[2])) g.images.push(im[2]);
+            else warnings.push(`[${lang}] недопустимый путь картинки ${im[2]} — нужен относительный путь внутри книги (media/…)`);
+            continue;
+          }
+          // ![](…) посреди строки: инлайн намеренно не поддержан (для схем это блок),
+          // но молча оставлять голый markdown нельзя — автор не поймёт, почему «не видно»
+          if (INLINE_IMG_RE.test(line)) {
+            warnings.push(`[${lang}] картинка внутри абзаца не поддерживается — вынеси ![…](…) на отдельную строку`);
+          }
+        }
       }
     }
     maps[lang] = map;
@@ -218,9 +281,11 @@ function buildChapter(texts, langs) {
       page: o ? o.page : null, // страница — только из оригинала, протягивается по id
       type: 'text',
       refs: [...new Set([...(o ? o.refs : []), ...(t ? t.refs : [])])],
+      // картинки обоих языков: у каждого своя разметка, но проверять валидатору — все
+      images: [...new Set([...(o ? o.images : []), ...(t ? t.images : [])])],
     };
-    pair[orig] = o ? renderGroup(o) : null;
-    if (trans) pair[trans] = t ? renderGroup(t) : null;
+    pair[orig] = o ? renderGroup(o, base) : null;
+    if (trans) pair[trans] = t ? renderGroup(t, base) : null;
     pairs.push(pair);
     // непарные секторы — НЕ ошибка: гибридная модель намеренно их допускает
     // (ru-only = проза во всю ширину, ar-only = оригинал с меткой «идёт перевод»);
@@ -236,7 +301,7 @@ function buildChapter(texts, langs) {
     if (!maps[lang]) continue;
     for (const g of maps[lang].values()) {
       if (g.type !== 'footnote') continue;
-      pairs.push({ id: g.baseId, lang, type: 'footnote', page: null, refs: g.refs, [lang]: renderGroup(g) });
+      pairs.push({ id: g.baseId, lang, type: 'footnote', page: null, refs: g.refs, images: g.images, [lang]: renderGroup(g, base) });
     }
   }
 

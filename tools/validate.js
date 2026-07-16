@@ -41,6 +41,16 @@ for (const ch of manifest.chapters) {
   const { pairs, warnings } = buildChapter(texts, manifest.languages);
   const fnCount = pairs.filter(p => p.type === 'footnote').length;
   const pages = [...new Set(pairs.map(p => p.page).filter(p => p != null))];
+
+  // Иллюстрации: ![](media/…) — путь от папки книги. Битую ссылку ловим здесь, а не
+  // на проде: валидатор гоняется в CI перед выкладкой, ошибка блокирует деплой.
+  // Парсер файловой системы не знает (он двусредный) — существование проверяем тут.
+  const imgs = [...new Set(pairs.flatMap(p => p.images || []))];
+  for (const src of imgs) {
+    if (!fs.existsSync(path.join(dir, src))) {
+      warnings.push(`картинка не найдена: ${src} (ищем в ${path.join(dir, src)})`);
+    }
+  }
   const only = missing.length
     ? `, только ${manifest.languages.filter(l => !missing.includes(l)).join('+') || '—'}`
     : '';
