@@ -141,13 +141,16 @@ node tools/validate.js books/tawfiq
   Workflow — `.github/workflows/pages.yml`: сборки нет, репозиторий выкладывается как есть;
   перед выкладкой прогоняются `node --check` и `tools/validate.js` по всем книгам —
   **сломанный Контракт блокирует деплой**. Ручной запуск — вкладка Actions → Run workflow.
-  Адрес: `https://ismailovvism-oss.github.io/chitalka-parallel/`.
+  Адрес: `https://ismailovvism-oss.github.io/biblioteka-tawhid/`.
   - **`.nojekyll` в корне трогать нельзя** — без него Jekyll выкидывает пути с `_`
     (`books/_sample/`, `books/_sample-en/`), и эталонные книги пропадают с прода.
   - SW network-first → онлайн всегда свежий; локально проверять `Ctrl+Shift+R`.
 - ⚠️ **Репозиторий разрабатывается с двух устройств параллельно.** ВСЕГДА `git fetch` +
   работа поверх свежего `origin/master` перед пушем; никогда не force-push. `master`
   «опубликованный». Бренд — **«Библиотека Таухид»**.
+- Репозиторий — `ismailovvism-oss/biblioteka-tawhid` (переименован из `chitalka-parallel`
+  16.07.2026). Локальная папка может по-прежнему называться `chitalka-parallel` — это
+  косметика, на remote не влияет. Имя кеша SW (`chitalka-vNN`) — внутренний ключ, не имя репо.
 - `parser.js` держать Node-совместимым (без DOM) — на нём валидатор.
 - Проверять синтаксис: `node --check app.js && node --check parser.js`.
 

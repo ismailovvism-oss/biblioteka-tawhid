@@ -5,6 +5,13 @@
 
 ## 2026-07-16 — деплой уехал на GitHub Pages; валидатор чинён
 
+### Репозиторий переименован: `chitalka-parallel` → `biblioteka-tawhid`
+- Проект перерос «читалку» и стал библиотекой — имя приведено к бренду. GitHub редиректит
+  старые URL (в т.ч. git), но **на всех клонах нужно `git remote set-url origin
+  git@github.com:ismailovvism-oss/biblioteka-tawhid.git`** — иначе работа идёт через
+  редирект, который однажды отвалится. Имя кеша SW (`chitalka-vNN`) намеренно не трогали:
+  это внутренний ключ кеша, а не имя репо.
+
 ### Деплой: Netlify → GitHub Pages
 - `.github/workflows/pages.yml` — **автодеплой на push в `master`**. На Netlify автодеплой
   был выключен (лимит кредитов) и выкладка шла вручную build-hook’ом; на Pages это
@@ -13,7 +20,7 @@
   **сломанный Контракт не доедет до прода**.
 - **`.nojekyll`** в корне — обязателен: Jekyll по умолчанию игнорирует пути с `_`,
   то есть выбросил бы `books/_sample/` и `books/_sample-en/`.
-- Адрес: `https://ismailovvism-oss.github.io/chitalka-parallel/` (свой домен не заводился).
+- Адрес: `https://ismailovvism-oss.github.io/biblioteka-tawhid/` (свой домен не заводился).
 
 ### Валидатор: гибридные книги больше не роняют его
 - `tools/validate.js` читал `<lang>/<file>` без проверки и падал с ENOENT на первой главе,
