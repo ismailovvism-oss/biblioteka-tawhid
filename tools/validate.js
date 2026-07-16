@@ -22,15 +22,30 @@ console.log(`Книга: ${manifest.bookId} — ${manifest.title[manifest.langua
 
 let total = 0;
 for (const ch of manifest.chapters) {
+  // запись-группа (header) — заголовок без файла, читать нечего
+  if (!ch.file) continue;
+
+  // Гибридная книга: главы у языка может не быть (напр. проза только в переводе).
+  // Как в читалке (loadChapterData) — нет файла, значит пусто, а не падение.
   const texts = {};
+  const missing = [];
   for (const lang of manifest.languages) {
-    texts[lang] = fs.readFileSync(path.join(dir, lang, ch.file), 'utf8');
+    try {
+      texts[lang] = fs.readFileSync(path.join(dir, lang, ch.file), 'utf8');
+    } catch (e) {
+      if (e.code !== 'ENOENT') throw e;
+      texts[lang] = '';
+      missing.push(lang);
+    }
   }
   const { pairs, warnings } = buildChapter(texts, manifest.languages);
   const fnCount = pairs.filter(p => p.type === 'footnote').length;
   const pages = [...new Set(pairs.map(p => p.page).filter(p => p != null))];
+  const only = missing.length
+    ? `, только ${manifest.languages.filter(l => !missing.includes(l)).join('+') || '—'}`
+    : '';
   console.log(
-    `  ${ch.file}: секторов ${pairs.length - fnCount}, сносок ${fnCount}, страницы: ${pages.join(', ') || '—'}`
+    `  ${ch.file}: секторов ${pairs.length - fnCount}, сносок ${fnCount}, страницы: ${pages.join(', ') || '—'}${only}`
   );
   for (const w of warnings) {
     console.log('    ⚠ ' + w);
