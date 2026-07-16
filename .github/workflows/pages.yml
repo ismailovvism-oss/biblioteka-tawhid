@@ -1,0 +1,49 @@
+name: Deploy to GitHub Pages
+
+# Сайт — чистая статика без сборки: репозиторий выкладывается как есть.
+# Автодеплой на каждый push в master (то, чего не было на Netlify из-за лимита кредитов).
+on:
+  push:
+    branches: [master]
+  workflow_dispatch: # ручной запуск из вкладки Actions
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Не даём параллельным деплоям обгонять друг друга; текущий не отменяем.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Контракт книг должен быть цел — иначе не выкладываем.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Проверка синтаксиса и Контракта книг
+        run: |
+          node --check app.js
+          node --check parser.js
+          node --check sw.js
+          for b in books/*/; do
+            [ -f "$b/book.json" ] || continue
+            echo "--- $b"
+            node tools/validate.js "${b%/}"
+          done
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+      - id: deployment
+        uses: actions/deploy-pages@v4
