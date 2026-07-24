@@ -1,28 +1,13 @@
 -- supabase/schema.sql — схема бэкенда «Библиотеки Таухид» (слой L5).
 -- Аккаунты, приватные/платные книги, права доступа, подписки. Дизайн — BACKEND.md.
 --
--- Применение: Supabase → SQL Editor → вставить целиком → Run. Идемпотентно.
--- Безопасность живёт здесь, в RLS-политиках, а не в UI приложения.
-
--- ── Профили (1:1 к auth.users) ───────────────────────────────────────────────
-create table if not exists public.profiles (
-  id           uuid primary key references auth.users(id) on delete cascade,
-  display_name text,
-  created_at   timestamptz not null default now()
-);
-
--- профиль заводится автоматически при регистрации
-create or replace function public.handle_new_user()
-returns trigger language plpgsql security definer set search_path = public as $$
-begin
-  insert into public.profiles (id) values (new.id) on conflict do nothing;
-  return new;
-end $$;
-
-drop trigger if exists on_auth_user_created on auth.users;
-create trigger on_auth_user_created
-  after insert on auth.users
-  for each row execute function public.handle_new_user();
+-- Применение: Supabase → SQL Editor → вставить целиком → Run. Идемпотентно, можно
+-- перезапускать. Безопасность живёт здесь, в RLS-политиках, а не в UI приложения.
+--
+-- Порядок важен: сначала создаются рабочие таблицы (books/entitlements/subscriptions),
+-- бакет и политики; хрупкий триггер на auth.users идёт ПОСЛЕДНИМ и обёрнут в перехват
+-- ошибки — если у роли нет прав на auth.users, он молча пропускается и не рушит скрипт
+-- (профиль тогда просто не заводится автоматически — для MVP это неважно).
 
 -- ── Каталог непубличных книг ─────────────────────────────────────────────────
 -- Публичные книги остаются в статическом books/index.json и здесь НЕ дублируются.
@@ -58,16 +43,18 @@ create table if not exists public.subscriptions (
   primary key (user_id, plan)
 );
 
+-- ── Профили (1:1 к auth.users; необязательно для MVP) ─────────────────────────
+create table if not exists public.profiles (
+  id           uuid primary key references auth.users(id) on delete cascade,
+  display_name text,
+  created_at   timestamptz not null default now()
+);
+
 -- ── RLS ──────────────────────────────────────────────────────────────────────
-alter table public.profiles      enable row level security;
 alter table public.books         enable row level security;
 alter table public.entitlements  enable row level security;
 alter table public.subscriptions enable row level security;
-
--- профиль: свой читаю и правлю
-drop policy if exists profiles_self on public.profiles;
-create policy profiles_self on public.profiles
-  for all using (id = auth.uid()) with check (id = auth.uid());
+alter table public.profiles      enable row level security;
 
 -- книга видна владельцу или тому, у кого есть непросроченное право
 drop policy if exists books_visible on public.books;
@@ -87,6 +74,11 @@ create policy ent_self_read on public.entitlements for select using (user_id = a
 -- свою подписку читаю; пишет только сервер (вебхук под service_role)
 drop policy if exists sub_self_read on public.subscriptions;
 create policy sub_self_read on public.subscriptions for select using (user_id = auth.uid());
+
+-- профиль: свой читаю и правлю
+drop policy if exists profiles_self on public.profiles;
+create policy profiles_self on public.profiles
+  for all using (id = auth.uid()) with check (id = auth.uid());
 
 -- ── Storage: приватный бакет содержимого приватных/платных книг ───────────────
 insert into storage.buckets (id, name, public)
@@ -110,6 +102,23 @@ create policy content_read on storage.objects for select using (
       )
   )
 );
-
 -- Запись/изменение в бакете — только сервер (service_role, обходит RLS): заливка книг
 -- идёт через tools/upload-private.js. Клиентских insert/update/delete-политик намеренно нет.
+
+-- ── Автозаведение профиля (хрупкая часть — в самом конце, с перехватом ошибки) ──
+create or replace function public.handle_new_user()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  insert into public.profiles (id) values (new.id) on conflict do nothing;
+  return new;
+end $$;
+
+do $$
+begin
+  drop trigger if exists on_auth_user_created on auth.users;
+  create trigger on_auth_user_created
+    after insert on auth.users
+    for each row execute function public.handle_new_user();
+exception when others then
+  raise notice 'Триггер on auth.users не создан (%): профиль будет заводиться приложением при входе. Остальная схема применена.', sqlerrm;
+end $$;
