@@ -710,13 +710,6 @@ mark.hl {
 }
 .about-line { margin: 0.5rem 0; }
 
-/* ── аккаунт (вход по ссылке на почту) ── */
-#acc-form { display: flex; gap: 0.4rem; margin: 0.7rem 0; flex-wrap: wrap; }
-#acc-email { flex: 1; min-width: 11rem; font: inherit; padding: 0.35rem 0.5rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); }
-#acc-form button.primary { padding: 0.35rem 0.7rem; border: 1px solid var(--accent); border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; }
-#acc-form button[disabled] { opacity: 0.6; cursor: default; }
-.acc-note { color: var(--muted); font-size: 0.88rem; }
-
 /* категории на полке */
 .chips {
   display: flex;
@@ -899,3 +892,13 @@ mark.hl {
   padding: 0.55rem 1rem;
   cursor: pointer;
 }
+
+/* ── Аккаунт (вход по магик-ссылке; секция в настройках) ── */
+#account { margin-bottom: 0.6rem; }
+.acct-hint { color: var(--muted); font-size: 0.85rem; margin: 0 0 0.4rem; }
+.acct-form { display: flex; gap: 0.4rem; }
+.acct-form input { flex: 1; min-width: 0; }
+#acct-in { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+#acct-who { color: var(--fg); font-size: 0.9rem; }
+.acct-msg { font-size: 0.85rem; margin: 0.4rem 0 0; color: var(--error); }
+.acct-msg.ok { color: var(--accent); }
