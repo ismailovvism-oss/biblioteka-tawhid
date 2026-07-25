@@ -42,6 +42,9 @@ self.addEventListener('activate', event => {
 });
 
 const isFont = url => /(^|\.)(googleapis|gstatic)\.com$/.test(url.hostname);
+// бэкенд (аутентификация, реестр приватных книг, подписанные URL) — мимо кеша совсем:
+// приватный контент не должен оседать в кеше, иначе токен-гейт обходится через него
+const isBackend = url => /(^|\.)supabase\.(co|in)$/.test(url.hostname);
 const cacheable = res => res && res.ok && (res.type === 'basic' || res.type === 'cors');
 
 async function cacheFirst(req) {
@@ -69,16 +72,11 @@ async function networkFirst(req) {
   }
 }
 
-// приватный контент из Supabase (подписанные URL, токен-гейт) НЕ кешируем — только сеть,
-// иначе гейт обходится через кеш (BACKEND.md → «Безопасность»). Подписанный URL и так
-// одноразовый, кеш бесполезен.
-const isPrivateBackend = url => /\.supabase\.co$/.test(url.hostname);
-
 self.addEventListener('fetch', event => {
   const req = event.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
-  if (isPrivateBackend(url)) return;                 // network-only, без вмешательства SW
+  if (isBackend(url)) return;                 // network-only, без участия SW
   if (isFont(url)) event.respondWith(cacheFirst(req));
   else event.respondWith(networkFirst(req));
 });
