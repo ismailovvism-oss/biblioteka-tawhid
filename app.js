@@ -98,10 +98,12 @@ async function fetchText(path) {
 /* Приватная книга (BACKEND.md, фаза 2): статической базы у неё нет — файлы лежат в
    закрытом бакете Supabase, а `base` записи хранит префикс объекта. Читаем через
    короткоживущий подписанный URL, который бэкенд выдаёт только при праве доступа (RLS).
-   Публичные книги идут прежним путём — прямым fetch с CDN, с кешем SW и офлайном. */
+   Публичные книги идут прежним путём — прямым fetch с CDN, с кешем SW и офлайном.
+   Флаг открытой книги — `privateBook` (ставится в openBook), но карточка книги рисуется
+   ДО открытия, поэтому режим можно передать явно вторым аргументом. */
 let privateBook = false;
-async function fetchBookText(path) {
-  if (!privateBook) return fetchText(path);
+async function fetchBookText(path, isPrivate = privateBook) {
+  if (!isPrivate) return fetchText(path);
   return fetchText(await SB.signedUrl('book-content', path));
 }
 
@@ -1374,7 +1376,7 @@ const searchChapters = new Map();  // `${id}/${file}` → данные глав�
 async function searchManifest(entry) {
   if (!searchManifests.has(entry.id)) {
     const b = entry.base.endsWith('/') ? entry.base : entry.base + '/';
-    const m = JSON.parse(await fetchText(b + 'book.json'));
+    const m = JSON.parse(await fetchBookText(b + 'book.json', entry.private === true));
     if (!Array.isArray(m.languages) || !Array.isArray(m.chapters)) throw new Error('bad manifest');
     if (!Array.isArray(m.rtl)) m.rtl = [];
     m._base = b;
@@ -1387,7 +1389,8 @@ async function searchChapter(entry, m, ci) {
   if (!searchChapters.has(key)) {
     const texts = {};
     await Promise.all(m.languages.map(async lang => {
-      try { texts[lang] = await fetchText(`${m._base}${lang}/${m.chapters[ci].file}`); }
+      // приватная книга ищется тоже — через подписанный URL, иначе она молча выпадет из поиска
+      try { texts[lang] = await fetchBookText(`${m._base}${lang}/${m.chapters[ci].file}`, entry.private === true); }
       catch { texts[lang] = ''; }
     }));
     searchChapters.set(key, buildChapter(texts, m.languages));
@@ -1919,7 +1922,9 @@ async function renderBookInfo(entry) {
   // манифест книги — за автором, аннотацией и числом глав
   let manifest = null;
   const baseUrl = entry.base.endsWith('/') ? entry.base : entry.base + '/';
-  try { manifest = JSON.parse(await fetchText(baseUrl + 'book.json')); } catch { /* карточка работает и без манифеста */ }
+  // приватная книга: манифест тоже из бакета, иначе карточка теряет автора и аннотацию
+  try { manifest = JSON.parse(await fetchBookText(baseUrl + 'book.json', entry.private === true)); }
+  catch { /* карточка работает и без манифеста */ }
 
   const box = document.createElement('div');
   box.className = 'bookinfo';
