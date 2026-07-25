@@ -1253,21 +1253,47 @@ document.addEventListener('keydown', e => {
   }
 });
 
-/* ===== свайп влево/вправо — смена глав (тач) ===== */
-let swipeX = null, swipeY = null, swipeT = 0;
+/* ===== свайп влево/вправо — смена глав (тач) =====
+ * Внутри блока со своей горизонтальной прокруткой (таблица, блок формул) жест сперва
+ * принадлежит блоку: пока таблице есть куда ехать, главы не листаются. Дошли до края —
+ * следующий свайп уже меняет главу. Полностью запретить нельзя: глава «Сводная таблица»
+ * почти целиком одна таблица, и из неё было бы не выйти. */
+function scrollerAt(node) {
+  for (let el = node instanceof Element ? node : null; el && el !== document.body; el = el.parentElement) {
+    if (el.scrollWidth <= el.clientWidth + 1) continue;
+    const ox = getComputedStyle(el).overflowX;
+    if (ox === 'auto' || ox === 'scroll') return el;
+  }
+  return null;
+}
+// сколько осталось прокрутки в каждую сторону; в RTL scrollLeft отрицателен
+function scrollRoom(el) {
+  const max = el.scrollWidth - el.clientWidth;
+  const fromStart = el.scrollLeft >= 0 ? el.scrollLeft : max + el.scrollLeft;
+  return { left: fromStart, right: max - fromStart };
+}
+
+let swipeX = null, swipeY = null, swipeT = 0, swipeRoom = null;
 document.addEventListener('touchstart', e => {
   if (e.touches.length !== 1) { swipeX = null; return; }
   swipeX = e.touches[0].clientX;
   swipeY = e.touches[0].clientY;
   swipeT = Date.now();
+  // запас меряем в НАЧАЛЕ жеста: тот же свайп, что прокрутил таблицу, не должен ещё и
+  // пролистнуть главу, даже если к концу жеста таблица доехала до упора
+  const sc = scrollerAt(e.target);
+  swipeRoom = sc ? scrollRoom(sc) : null;
 }, { passive: true });
 document.addEventListener('touchend', e => {
   if (swipeX == null) return;
   const t = e.changedTouches[0];
   const dx = t.clientX - swipeX, dy = t.clientY - swipeY, dt = Date.now() - swipeT;
-  swipeX = null;
+  const room = swipeRoom;
+  swipeX = null; swipeRoom = null;
   if (document.body.dataset.view !== 'reading' || !book || anyPopupOpen()) return;
   if (dt > 600 || Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 2) return; // не горизонтальный свайп
+  // палец влево — содержимое едет влево, значит прокрутка вправо; и наоборот
+  if (room && (dx < 0 ? room.right : room.left) > 1) return;
   if (dx < 0) { const n = nextReadable(chapterIndex, 1); if (n >= 0) loadChapter(n); }
   else { const p = nextReadable(chapterIndex, -1); if (p >= 0) loadChapter(p); }
 }, { passive: true });
