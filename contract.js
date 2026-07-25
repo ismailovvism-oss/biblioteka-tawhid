@@ -81,8 +81,20 @@ function parseBody(body) {
   let pendingPage = null; // страница из маркера — присвоится следующему блоку
   let pendingId = null;   // якорь из маркера — задаст ID следующему сектору
   const flush = () => { if (cur && cur.lines.length) blocks.push(cur); cur = null; };
+  let inFence = false;   // ```…``` — содержимое неприкосновенно, см. ниже
   for (const raw of main) {
     const l = raw.replace(/\s+$/, '');
+    /* Внутри ограды строка идёт как есть: там пустая строка, «---» и «## …» — это
+       ASCII-схема или формальная запись, а не разделитель блока и не заголовок.
+       Без этого блок формул разорвался бы на два сектора и сбил посекторную парность. */
+    if (/^\s*```/.test(l)) {
+      inFence = !inFence;
+      if (!cur) { cur = { kind: 'text', lines: [], id: pendingId }; pendingId = null; }
+      if (pendingPage != null && cur.page == null) { cur.page = pendingPage; pendingPage = null; }
+      cur.lines.push(l);
+      continue;
+    }
+    if (inFence) { if (cur) cur.lines.push(l); continue; }
     if (l.trim() === '' || l.trim() === '---') { flush(); continue; }
     const pm = l.trim().match(PAGE_RE);
     if (pm) { pendingPage = parseInt(toWesternDigits(pm[1]), 10); continue; }

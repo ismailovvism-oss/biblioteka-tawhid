@@ -16,14 +16,19 @@ function escapeHtml(s) {
     .replace(/"/g, '&quot;');
 }
 
-/* Inline-markdown внутри сектора: подчёркивание, жирный, курсив, маркеры сносок [^N]. */
+/* Inline-markdown внутри сектора: код, подчёркивание, жирный, курсив, маркеры сносок [^N].
+   Код в обратных кавычках вынимается ПЕРВЫМ и подменяется плейсхолдером: внутри `a*b*c`
+   звёздочки — часть термина (транслитерация вроде `qiyas istithna'i`), а не курсив. */
 function inlineMd(text) {
   let h = escapeHtml(text);
+  const codes = [];
+  h = h.replace(/`([^`]+)`/g, (_, c) => '\u0000' + (codes.push(c) - 1) + '\u0000');
   h = h.replace(/&lt;u&gt;([\s\S]*?)&lt;\/u&gt;/g, '<u>$1</u>'); // подчёркивание <u>…</u>
   h = h.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   h = h.replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>');
   h = h.replace(/\[\^(\d+)\]/g, '<button class="fnref" data-fn="$1" type="button">$1</button>');
   h = h.replace(/\n/g, '<br>');
+  h = h.replace(/\u0000(\d+)\u0000/g, (_, n) => '<code>' + codes[Number(n)] + '</code>');
   return h;
 }
 
@@ -67,14 +72,77 @@ const CALLOUT_LABELS = {
  * содержать вложенные блоки. Тип callout произвольный — неизвестный получает
  * дефолтный стиль (.callout-<тип>), так что набор типов не захардкожен.
  */
+/*
+ * Таблица (SPEC 3.4b) — разметка GFM: строка ячеек через «|», под ней строка-разделитель
+ * из дефисов. Двоеточия в разделителе задают выравнивание колонки (:-- слева, --: справа,
+ * :-: по центру). Нужна справочникам: словари терминов, таблицы соответствий, парадигмы.
+ *
+ * Картинкой такое верстать нельзя: изображение не ищется поиском, из него не скопировать
+ * термин, оно не переносится по ширине экрана и не слушается размера шрифта и темы.
+ * Поэтому именно разметка, а горизонтальная прокрутка узких экранов — забота CSS.
+ */
+const TABLE_SEP_RE = /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/;
+const isTableRow = l => l.includes('|') && l.trim() !== '';
+
+// «| a | b |» → ['a','b']. Экранированная «\|» внутри ячейки остаётся символом.
+function splitRow(line) {
+  const cells = line.trim().replace(/^\|/, '').replace(/\|$/, '')
+    .split(/(?<!\\)\|/).map(c => c.replace(/\\\|/g, '|').trim());
+  return cells;
+}
+
+function alignsOf(sep) {
+  return splitRow(sep).map(c => {
+    const l = c.startsWith(':'), r = c.endsWith(':');
+    return l && r ? 'center' : r ? 'right' : l ? 'left' : '';
+  });
+}
+
+function renderTable(head, sep, body) {
+  const aligns = alignsOf(sep);
+  const cell = (tag, text, i) => {
+    const a = aligns[i] ? ' style="text-align:' + aligns[i] + '"' : '';
+    return '<' + tag + a + '>' + inlineMd(text) + '</' + tag + '>';
+  };
+  const thead = '<thead><tr>' + splitRow(head).map((c, i) => cell('th', c, i)).join('') + '</tr></thead>';
+  const tbody = body.length
+    ? '<tbody>' + body.map(r => '<tr>' + splitRow(r).map((c, i) => cell('td', c, i)).join('') + '</tr>').join('') + '</tbody>'
+    : '';
+  // обёртка со своей прокруткой: широкая таблица не должна разъезжать страницу вбок
+  return '<div class="table-wrap"><table>' + thead + tbody + '</table></div>';
+}
+
 function renderBlocks(lines, base) {
   base = base || '';
   const isQuote = l => /^>\s?/.test(l);
   const isUl = l => /^[-*]\s+/.test(l);
   const isOl = l => /^\d+\.\s+/.test(l);
+  const isFence = l => /^\s*```/.test(l);
+  const isTableStart = n => isTableRow(lines[n]) && n + 1 < lines.length
+    && TABLE_SEP_RE.test(lines[n + 1]) && lines[n + 1].includes('-');
   const out = [];
   let i = 0;
   while (i < lines.length) {
+    /* Блок кода/формул: ```…``` — моноширинно, без разбора разметки внутри. Держит
+       ASCII-схемы и формальную запись (∀x (S(x) → P(x))), где пробелы значимы.
+       Пустая строка завершает сектор, поэтому пустых строк внутри блока быть не может. */
+    if (isFence(lines[i])) {
+      i++;
+      const code = [];
+      while (i < lines.length && !isFence(lines[i])) { code.push(lines[i]); i++; }
+      if (i < lines.length) i++;                 // закрывающая ограда
+      out.push('<pre class="code"><code>' + escapeHtml(code.join('\n')) + '</code></pre>');
+      continue;
+    }
+    // таблица: строка с «|», под ней разделитель из дефисов
+    if (isTableStart(i)) {
+      const head = lines[i], sep = lines[i + 1];
+      i += 2;
+      const body = [];
+      while (i < lines.length && isTableRow(lines[i]) && !isFence(lines[i])) { body.push(lines[i]); i++; }
+      out.push(renderTable(head, sep, body));
+      continue;
+    }
     // строка целиком из ![подпись](путь) → <figure>. Подпись необязательна.
     const im = lines[i].match(IMG_RE);
     if (im && safeImgSrc(im[2])) {
@@ -124,6 +192,7 @@ function renderBlocks(lines, base) {
     // прогон абзаца обрывается и на картинке — иначе «Вот схема:» + ![](…) на следующей
     // строке склеились бы в один <p> и разметка осталась бы голым текстом
     while (i < lines.length && !isQuote(lines[i]) && !isUl(lines[i]) && !isOl(lines[i])
+           && !isFence(lines[i]) && !isTableStart(i)
            && !(IMG_RE.test(lines[i]) && safeImgSrc(lines[i].match(IMG_RE)[2]))) { run.push(lines[i]); i++; }
     out.push('<p>' + inlineMd(run.join('\n')) + '</p>');
   }
@@ -142,6 +211,7 @@ function parseFile(md) {
   let page = null;
   let cur = null;
   let inNote = false;   // регион <!-- note --> … <!-- /note --> — личные правки автора, не публикуем
+  let inFence = false;  // внутри ```…``` пробелы значимы (ASCII-схемы) и пустая строка не рвёт сектор
 
   const flush = () => {
     if (cur) {
@@ -165,16 +235,19 @@ function parseFile(md) {
     }
     if ((m = line.match(/^<!--\s*(s\d+)([a-z]?)\s*-->$/))) {
       flush();
+      inFence = false;   // якорь сильнее ограды: незакрытый ``` портит один сектор, не файл
       cur = { id: m[1] + m[2], baseId: m[1], type: 'text', page, paras: [''] };
       continue;
     }
     if ((m = line.match(/^<!--\s*fn(\d+)\s*-->$/))) {
       flush();
+      inFence = false;
       cur = { id: 'fn' + m[1], baseId: 'fn' + m[1], type: 'footnote', page, paras: [''] };
       continue;
     }
     if (!cur) continue; // текст вне якорей игнорируется
-    if (line === '') {
+    if (/^```/.test(line)) inFence = !inFence;
+    if (line === '' && !inFence) {
       if (cur.type === 'text') {
         flush(); // сектор заканчивается на пустой строке
       } else if (cur.paras[cur.paras.length - 1] !== '') {
@@ -182,8 +255,10 @@ function parseFile(md) {
       }
       continue;
     }
+    // внутри ограды строка идёт как есть: в ASCII-схеме и формальной записи отступ значим
+    const keep = inFence ? raw.replace(/\s+$/, '') : line;
     const last = cur.paras.length - 1;
-    cur.paras[last] = cur.paras[last] ? cur.paras[last] + '\n' + line : line;
+    cur.paras[last] = cur.paras[last] !== '' ? cur.paras[last] + '\n' + keep : keep;
   }
   flush();
   return items;

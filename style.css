@@ -177,6 +177,47 @@ body[data-align="justify"] .member p { text-align: justify; }
 .member .callout-warning, .member .callout-important { border-inline-start-color: #c9821e; }
 .member .callout-danger, .member .callout-failure { border-inline-start-color: var(--error); }
 .member .callout-success { border-inline-start-color: #3f8f54; }
+/* таблицы (справочники: соответствия терминов, парадигмы). Ключевое — .table-wrap:
+   широкая таблица прокручивается ВНУТРИ себя, страница вбок не разъезжается. */
+.member .table-wrap {
+  margin: 0.6em 0; overflow-x: auto; -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--border); border-radius: 6px;
+}
+.member .table-wrap table {
+  border-collapse: collapse; width: 100%;
+  font-size: 0.92em; line-height: 1.4;
+}
+.member .table-wrap th, .member .table-wrap td {
+  padding: 0.35em 0.6em; text-align: start;
+  border-inline-end: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  /* колонки не должны схлопываться в лесенку из одиночных букв на узком экране */
+  min-width: 4.5em; hyphens: none;
+}
+.member .table-wrap th:last-child, .member .table-wrap td:last-child { border-inline-end: 0; }
+.member .table-wrap tr:last-child td { border-bottom: 0; }
+.member .table-wrap thead th {
+  background: var(--panel); font-weight: 600;
+  position: sticky; top: 0;   /* шапка держится при прокрутке длинной таблицы */
+}
+/* выравнивание из разделителя (:--, --:, :-:) приходит инлайн-стилем — оно и побеждает */
+
+/* блок формул и ASCII-схем: моноширинно, пробелы значимы, своя прокрутка */
+.member pre.code {
+  margin: 0.6em 0; padding: 0.6em 0.7em; overflow-x: auto;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+  font-family: ui-monospace, "DejaVu Sans Mono", Menlo, Consolas, monospace;
+  font-size: 0.88em; line-height: 1.45; white-space: pre; tab-size: 2;
+  /* формулы и схемы латинские — в RTL-книге блок всё равно читается слева направо */
+  direction: ltr; text-align: left;
+}
+.member pre.code code { font: inherit; background: none; padding: 0; }
+.member code {
+  font-family: ui-monospace, "DejaVu Sans Mono", Menlo, Consolas, monospace;
+  font-size: 0.9em; padding: 0.05em 0.3em; border-radius: 4px;
+  background: var(--accent-soft); direction: ltr; unicode-bidi: isolate;
+}
+
 /* иллюстрация в тексте: ![подпись](media/…) — график, схема, пояснение.
    Тап по картинке → полноэкранный просмотр (тот же, что у сканов страниц). */
 .member .fig { margin: 0.7em 0; text-align: center; }
