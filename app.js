@@ -95,6 +95,16 @@ async function fetchText(path) {
   return res.text();
 }
 
+/* Приватная книга (BACKEND.md, фаза 2): статической базы у неё нет — файлы лежат в
+   закрытом бакете Supabase, а `base` записи хранит префикс объекта. Читаем через
+   короткоживущий подписанный URL, который бэкенд выдаёт только при праве доступа (RLS).
+   Публичные книги идут прежним путём — прямым fetch с CDN, с кешем SW и офлайном. */
+let privateBook = false;
+async function fetchBookText(path) {
+  if (!privateBook) return fetchText(path);
+  return fetchText(await SB.signedUrl('book-content', path));
+}
+
 function showLoadError(msg) {
   stream.innerHTML = '';
   const div = document.createElement('div');
@@ -110,7 +120,7 @@ async function loadChapterData(i) {
     const texts = {};
     await Promise.all(book.languages.map(async lang => {
       // нет файла для языка (гибрид: глава только на одном языке) — не падаем, пусто
-      try { texts[lang] = await fetchText(`${base}${lang}/${file}`); }
+      try { texts[lang] = await fetchBookText(`${base}${lang}/${file}`); }
       catch { texts[lang] = ''; }
     }));
     // base — чтобы ![](media/…) в секторе резолвился от папки книги, как и сканы
@@ -1994,11 +2004,12 @@ async function renderBookInfo(entry) {
 async function openBook(entry, opts = {}) {
   bookId = entry.id;
   base = entry.base.endsWith('/') ? entry.base : entry.base + '/';
+  privateBook = entry.private === true;   // непубличная книга → путь через бакет
   chapterCache.clear();
   document.body.dataset.view = 'reading';
   $('#chapter-title').textContent = 'Загрузка…';
   try {
-    book = JSON.parse(await fetchText(base + 'book.json'));
+    book = JSON.parse(await fetchBookText(base + 'book.json'));
   } catch (err) {
     showLoadError(`Не удалось загрузить книгу «${entry.id}»: ${err.message}`);
     $('#chapter-title').textContent = 'Ошибка';
@@ -2077,15 +2088,96 @@ $('#filter-reset').addEventListener('click', () => {
   renderLibrary(); renderFilterSheet();
 });
 
+/* ===== аккаунт и каталог за бэкендом (BACKEND.md, фаза 1) =====
+   Полка = статический реестр ∪ непубличные книги, доступные вошедшему. Аноним видит
+   ровно то же, что и раньше: бэкенд не отвечает или не настроен — просто нет второго
+   слагаемого, публичная читалка работает как работала. */
+let staticLibrary = [];             // то, что пришло из books/index.json
+const backendReady = () => Boolean(window.SB && SB.configured());
+
+async function loadPrivateBooks() {
+  if (!backendReady()) return [];
+  try {
+    if (!(await SB.isSignedIn())) return [];
+    const rows = await SB.rest('books?select=id,meta,storage_base,visibility');
+    // meta — это готовая запись реестра; id/base/private проставляем поверх неё
+    return rows.map(r => Object.assign({}, r.meta || {}, {
+      id: r.id,
+      base: r.storage_base.endsWith('/') ? r.storage_base : r.storage_base + '/',
+      visibility: r.visibility,
+      private: true,
+    }));
+  } catch (err) {
+    console.warn('непубличные книги не загрузились:', err);
+    return [];
+  }
+}
+
+async function refreshLibrary() {
+  library = staticLibrary.concat(await loadPrivateBooks());
+}
+
+async function renderAccount() {
+  const state = $('#acc-state'), form = $('#acc-form'), out = $('#acc-signout');
+  if (!backendReady()) {
+    state.textContent = 'Бэкенд не настроен (supabase/config.js) — доступны только публичные книги.';
+    form.hidden = true; out.hidden = true;
+    return;
+  }
+  const user = await SB.currentUser();
+  form.hidden = Boolean(user);
+  out.hidden = !user;
+  state.textContent = user
+    ? `Вход выполнен${user.email ? ' — ' + user.email : ''}. Непубличные книги, доступные вам, показаны в библиотеке.`
+    : 'Вход не выполнен.';
+}
+
+$('#btn-account').addEventListener('click', () => {
+  $('#settings').hidden = true;
+  renderAccount();
+  openOverlay($('#account'));
+});
+
+$('#acc-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const email = $('#acc-email').value.trim();
+  if (!email) return;
+  const btn = $('#acc-form').querySelector('button');
+  btn.disabled = true;
+  try {
+    // возвращаться туда же, откуда вошли (адрес должен быть в Redirect URLs проекта)
+    await SB.sendMagicLink(email, location.origin + location.pathname);
+    $('#acc-state').textContent = 'Ссылка отправлена на ' + email + '. Откройте её на этом устройстве.';
+    $('#acc-form').hidden = true;
+  } catch (err) {
+    $('#acc-state').textContent = 'Не получилось отправить ссылку: ' + err.message;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$('#acc-signout').addEventListener('click', async () => {
+  SB.signOut();
+  await refreshLibrary();
+  await renderAccount();
+  document.body.dataset.view = 'library';
+  renderLibrary();
+  toast('Вы вышли');
+});
+
 /* ===== старт ===== */
 async function init() {
   applyTheme();
   applyLayout();
   applyAlign();
   bindSettings();
+  // возврат по магик-линку: токены прилетают в hash — снять их до разбора маршрута
+  let authBack = null;
+  if (backendReady()) { try { authBack = SB.consumeAuthCallback(); } catch { /* не мешаем старту */ } }
   try {
     const idx = JSON.parse(await fetchText('books/index.json'));
-    library = Array.isArray(idx) ? idx : (idx.books || []);
+    staticLibrary = Array.isArray(idx) ? idx : (idx.books || []);
+    library = staticLibrary;
     // дерево категорий — отдельный файл taxonomy.json (плоский список узлов с parent)
     try {
       const tax = JSON.parse(await fetchText('books/taxonomy.json'));
@@ -2098,7 +2190,15 @@ async function init() {
     $('#chapter-title').textContent = 'Ошибка';
     return;
   }
+  // непубличные книги — уже поверх готового реестра: если бэкенд молчит, полка живёт
+  await refreshLibrary();
   route();
+  // молча проглоченная неудача входа выглядит как «ссылка не работает» — сказать вслух
+  if (authBack) {
+    toast(authBack.status === 'signed-in'
+      ? 'Вход выполнен'
+      : 'Ссылка не сработала: ' + (authBack.message || 'срок истёк'));
+  }
 }
 
 init();

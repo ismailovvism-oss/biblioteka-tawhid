@@ -710,6 +710,13 @@ mark.hl {
 }
 .about-line { margin: 0.5rem 0; }
 
+/* ── аккаунт (вход по ссылке на почту) ── */
+#acc-form { display: flex; gap: 0.4rem; margin: 0.7rem 0; flex-wrap: wrap; }
+#acc-email { flex: 1; min-width: 11rem; font: inherit; padding: 0.35rem 0.5rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); }
+#acc-form button.primary { padding: 0.35rem 0.7rem; border: 1px solid var(--accent); border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; }
+#acc-form button[disabled] { opacity: 0.6; cursor: default; }
+.acc-note { color: var(--muted); font-size: 0.88rem; }
+
 /* категории на полке */
 .chips {
   display: flex;

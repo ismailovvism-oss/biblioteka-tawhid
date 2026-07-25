@@ -10,13 +10,15 @@
  * Версию бампать при изменении оболочки — старый кеш чистится на activate.
  */
 
-const VERSION = 'chitalka-v33';
+const VERSION = 'chitalka-v34';
 const SHELL = [
   './',
   'index.html',
   'style.css',
   'parser.js',
   'app.js',
+  'supabase/config.js',
+  'supabase/client.js',
   'manifest.webmanifest',
   'books/index.json',
   'books/taxonomy.json',
@@ -40,6 +42,9 @@ self.addEventListener('activate', event => {
 });
 
 const isFont = url => /(^|\.)(googleapis|gstatic)\.com$/.test(url.hostname);
+// бэкенд (аутентификация, реестр приватных книг, подписанные URL) — мимо кеша совсем:
+// приватный контент не должен оседать в кеше, иначе токен-гейт обходится через него
+const isBackend = url => /(^|\.)supabase\.(co|in)$/.test(url.hostname);
 const cacheable = res => res && res.ok && (res.type === 'basic' || res.type === 'cors');
 
 async function cacheFirst(req) {
@@ -71,6 +76,7 @@ self.addEventListener('fetch', event => {
   const req = event.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
+  if (isBackend(url)) return;                 // network-only, без участия SW
   if (isFont(url)) event.respondWith(cacheFirst(req));
   else event.respondWith(networkFirst(req));
 });

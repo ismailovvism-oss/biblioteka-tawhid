@@ -118,9 +118,24 @@
     <label class="row">Режим проверки (валидатор)
       <input id="set-debug" type="checkbox">
     </label>
+    <button type="button" id="btn-account" class="link-btn">👤 Аккаунт</button>
     <button type="button" id="btn-stats" class="link-btn">📊 Статистика</button>
     <button type="button" id="btn-help" class="link-btn">❔ Справка</button>
     <button type="button" id="btn-about" class="link-btn">ℹ О приложении</button>
+  </div>
+</div>
+
+<div id="account" class="overlay" hidden>
+  <div class="sheet">
+    <h2>Аккаунт</h2>
+    <p class="about-line" id="acc-state">Вход не выполнен.</p>
+    <form id="acc-form">
+      <input id="acc-email" type="email" placeholder="Почта" autocomplete="email" required>
+      <button type="submit" class="primary">Прислать ссылку для входа</button>
+    </form>
+    <p class="about-line acc-note">Пароля нет: на почту приходит ссылка, по ней и происходит вход. Регистрация закрыта — ссылка сработает только для владельца библиотеки.</p>
+    <p class="about-line acc-note">Публичные книги открыты всем и без входа. Вход нужен для книг, которых нет в общем каталоге.</p>
+    <button type="button" id="acc-signout" class="link-btn" hidden>Выйти</button>
   </div>
 </div>
 
@@ -216,6 +231,10 @@
 <div id="img-overlay" hidden><img id="img-scan" alt="Скан страницы"></div>
 
 <script src="parser.js"></script>
+<!-- бэкенд (BACKEND.md): публичные книги работают и без него — если config.js пуст
+     или сеть недоступна, приложение просто остаётся в анонимном режиме -->
+<script src="supabase/config.js"></script>
+<script src="supabase/client.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
