@@ -77,6 +77,8 @@ let taxNodes = [];        // дерево категорий: плоский с�
 let taxById = new Map();  // id → узел
 let bookId = null;        // id выбранной книги
 let base = '';            // префикс путей книги: локальный путь или URL, с «/» на конце
+let bookPrivate = false;  // приватная книга: файлы из Storage за подписанным URL, а не с CDN
+let bookStorageBase = ''; // префикс книги в приватном бакете (для приватных)
 let book = null;          // манифест book.json
 let chapterIndex = 0;
 let pairs = [];           // модель текущей главы
@@ -95,6 +97,17 @@ async function fetchText(path) {
   return res.text();
 }
 
+// файл книги: публичная — прямой fetch с CDN; приватная — короткоживущий подписанный URL
+// из приватного бакета Supabase (требует входа и права доступа, всё решает RLS).
+async function bookFileText(relPath, priv, storageBase, pubBase) {
+  if (priv) {
+    if (!(window.SB && SB.configured())) throw new Error('нет доступа к приватному хранилищу');
+    const url = await SB.signedUrl('book-content', storageBase + relPath, 120);
+    return fetchText(url);
+  }
+  return fetchText(pubBase + relPath);
+}
+
 function showLoadError(msg) {
   stream.innerHTML = '';
   const div = document.createElement('div');
@@ -110,7 +123,7 @@ async function loadChapterData(i) {
     const texts = {};
     await Promise.all(book.languages.map(async lang => {
       // нет файла для языка (гибрид: глава только на одном языке) — не падаем, пусто
-      try { texts[lang] = await fetchText(`${base}${lang}/${file}`); }
+      try { texts[lang] = await bookFileText(`${lang}/${file}`, bookPrivate, bookStorageBase, base); }
       catch { texts[lang] = ''; }
     }));
     // base — чтобы ![](media/…) в секторе резолвился от папки книги, как и сканы
@@ -1909,7 +1922,8 @@ async function renderBookInfo(entry) {
   // манифест книги — за автором, аннотацией и числом глав
   let manifest = null;
   const baseUrl = entry.base.endsWith('/') ? entry.base : entry.base + '/';
-  try { manifest = JSON.parse(await fetchText(baseUrl + 'book.json')); } catch { /* карточка работает и без манифеста */ }
+  try { manifest = JSON.parse(await bookFileText('book.json', !!entry._private, entry._storageBase || '', baseUrl)); }
+  catch { /* карточка работает и без манифеста */ }
 
   const box = document.createElement('div');
   box.className = 'bookinfo';
@@ -1994,11 +2008,13 @@ async function renderBookInfo(entry) {
 async function openBook(entry, opts = {}) {
   bookId = entry.id;
   base = entry.base.endsWith('/') ? entry.base : entry.base + '/';
+  bookPrivate = !!entry._private;
+  bookStorageBase = entry._storageBase || '';
   chapterCache.clear();
   document.body.dataset.view = 'reading';
   $('#chapter-title').textContent = 'Загрузка…';
   try {
-    book = JSON.parse(await fetchText(base + 'book.json'));
+    book = JSON.parse(await bookFileText('book.json', bookPrivate, bookStorageBase, base));
   } catch (err) {
     showLoadError(`Не удалось загрузить книгу «${entry.id}»: ${err.message}`);
     $('#chapter-title').textContent = 'Ошибка';
@@ -2083,9 +2099,11 @@ async function init() {
   applyLayout();
   applyAlign();
   bindSettings();
+  setupAccount();               // вход/выход (магик-линк); подхватывает возврат по ссылке
   try {
     const idx = JSON.parse(await fetchText('books/index.json'));
     library = Array.isArray(idx) ? idx : (idx.books || []);
+    await mergeMyBooks();       // приватные/платные книги вошедшего — в реестр (RLS)
     // дерево категорий — отдельный файл taxonomy.json (плоский список узлов с parent)
     try {
       const tax = JSON.parse(await fetchText('books/taxonomy.json'));
@@ -2099,6 +2117,62 @@ async function init() {
     return;
   }
   route();
+}
+
+// приватные/платные книги вошедшего пользователя: тянем из Supabase (RLS отдаёт только
+// доступные), приводим к форме записи реестра и дописываем в library. Аноним/ошибка —
+// тихо остаёмся на публичном каталоге.
+async function mergeMyBooks() {
+  if (!(window.SB && SB.configured())) return;
+  try {
+    if (!(await SB.isSignedIn())) return;
+    const rows = await SB.rest('books?select=id,visibility,meta,storage_base');
+    for (const r of rows) {
+      if (!r || !r.id || library.some(b => b.id === r.id)) continue;
+      const sb = r.storage_base ? (r.storage_base.endsWith('/') ? r.storage_base : r.storage_base + '/') : r.id + '/';
+      library.push(Object.assign({}, r.meta, {
+        id: r.id, base: sb, _private: true, _storageBase: sb, visibility: r.visibility,
+      }));
+    }
+  } catch (e) { console.warn('Приватные книги не загружены:', e); }
+}
+
+// вход по магик-ссылке. Секция «Аккаунт» видна только если бэкенд настроен (config.js).
+function setupAccount() {
+  const sec = $('#account');
+  if (!sec) return;
+  if (!(window.SB && SB.configured())) { sec.hidden = true; return; }
+  SB.consumeAuthCallback();          // возврат по ссылке: забрать токены из адреса
+  sec.hidden = false;
+
+  const msg = $('#acct-msg');
+  const showMsg = (t, ok) => { msg.hidden = false; msg.textContent = t; msg.classList.toggle('ok', !!ok); };
+
+  $('#acct-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const addr = $('#acct-email').value.trim();
+    if (!addr) return;
+    $('#acct-login').disabled = true;
+    try {
+      await SB.sendMagicLink(addr, location.origin + location.pathname);
+      showMsg(`Ссылка для входа отправлена на ${addr}. Откройте письмо на этом устройстве.`, true);
+    } catch (err) {
+      showMsg('Не удалось отправить ссылку: ' + err.message, false);
+    } finally { $('#acct-login').disabled = false; }
+  });
+
+  $('#acct-logout').addEventListener('click', () => { SB.signOut(); location.reload(); });
+  updateAcctUI();
+}
+
+function updateAcctUI() {
+  const u = window.SB && SB.getUser && SB.getUser();
+  if (u) {
+    $('#acct-who').textContent = 'Вы вошли' + (u.email ? ': ' + u.email : '');
+    $('#acct-in').hidden = false; $('#acct-out').hidden = true;
+  } else {
+    $('#acct-in').hidden = true; $('#acct-out').hidden = false;
+  }
 }
 
 init();

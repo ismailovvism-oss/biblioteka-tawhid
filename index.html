@@ -75,6 +75,21 @@
 <div id="settings" class="overlay" hidden>
   <div class="sheet">
     <h2>Настройки</h2>
+    <section id="account" hidden>
+      <h3 class="sheet-sub">Аккаунт</h3>
+      <div id="acct-out">
+        <p class="acct-hint">Вход по ссылке на почту — чтобы видеть свои приватные книги.</p>
+        <form id="acct-form" class="acct-form">
+          <input id="acct-email" type="email" placeholder="e-mail" autocomplete="email" required>
+          <button type="submit" id="acct-login">Войти</button>
+        </form>
+      </div>
+      <div id="acct-in" hidden>
+        <span id="acct-who"></span>
+        <button type="button" id="acct-logout" class="link-btn">Выйти</button>
+      </div>
+      <p id="acct-msg" class="acct-msg" hidden></p>
+    </section>
     <label>Тема
       <select id="set-theme">
         <option value="auto">как в системе</option>
@@ -215,6 +230,8 @@
 
 <div id="img-overlay" hidden><img id="img-scan" alt="Скан страницы"></div>
 
+<script src="supabase/config.js"></script>
+<script src="supabase/client.js"></script>
 <script src="parser.js"></script>
 <script src="app.js"></script>
 </body>

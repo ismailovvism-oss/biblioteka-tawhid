@@ -10,13 +10,15 @@
  * Версию бампать при изменении оболочки — старый кеш чистится на activate.
  */
 
-const VERSION = 'chitalka-v33';
+const VERSION = 'chitalka-v34';
 const SHELL = [
   './',
   'index.html',
   'style.css',
   'parser.js',
   'app.js',
+  'supabase/config.js',
+  'supabase/client.js',
   'manifest.webmanifest',
   'books/index.json',
   'books/taxonomy.json',
@@ -67,10 +69,16 @@ async function networkFirst(req) {
   }
 }
 
+// приватный контент из Supabase (подписанные URL, токен-гейт) НЕ кешируем — только сеть,
+// иначе гейт обходится через кеш (BACKEND.md → «Безопасность»). Подписанный URL и так
+// одноразовый, кеш бесполезен.
+const isPrivateBackend = url => /\.supabase\.co$/.test(url.hostname);
+
 self.addEventListener('fetch', event => {
   const req = event.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
+  if (isPrivateBackend(url)) return;                 // network-only, без вмешательства SW
   if (isFont(url)) event.respondWith(cacheFirst(req));
   else event.respondWith(networkFirst(req));
 });
