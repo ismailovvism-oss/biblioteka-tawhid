@@ -81,10 +81,24 @@
     async getToken()   { const s = await refreshIfNeeded(); return s ? s.access_token : null; },
     async isSignedIn() { return Boolean(await SB.getToken()); },
 
-    // запрос к PostgREST под пользователем (RLS решает видимость строк)
+    // синхронно: кто вошёл (из payload access-токена, без обращения к сети)
+    getUser() {
+      const s = loadSession();
+      if (!s || !s.access_token) return null;
+      try {
+        const b64 = s.access_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+        const p   = JSON.parse(atob(b64));
+        return { id: p.sub || null, email: p.email || null };
+      } catch { return null; }
+    },
+
+    // запрос к PostgREST под пользователем (RLS решает видимость строк).
+    // Ключ нового формата (sb_publishable_…) — только в apikey; Bearer'ом шлём лишь
+    // пользовательский access-токен, если есть.
     async rest(pathAndQuery, opts = {}) {
       const token   = await SB.getToken();
-      const headers = Object.assign({ apikey: ANON, Authorization: 'Bearer ' + (token || ANON) }, opts.headers || {});
+      const headers = Object.assign({ apikey: ANON }, opts.headers || {});
+      if (token) headers.Authorization = 'Bearer ' + token;
       const res     = await fetch(BASE + '/rest/v1/' + pathAndQuery, Object.assign({}, opts, { headers }));
       if (!res.ok) throw new Error(`REST ${res.status}`);
       return res.json();

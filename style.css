@@ -892,3 +892,13 @@ mark.hl {
   padding: 0.55rem 1rem;
   cursor: pointer;
 }
+
+/* ── Аккаунт (вход по магик-ссылке; секция в настройках) ── */
+#account { margin-bottom: 0.6rem; }
+.acct-hint { color: var(--muted); font-size: 0.85rem; margin: 0 0 0.4rem; }
+.acct-form { display: flex; gap: 0.4rem; }
+.acct-form input { flex: 1; min-width: 0; }
+#acct-in { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+#acct-who { color: var(--fg); font-size: 0.9rem; }
+.acct-msg { font-size: 0.85rem; margin: 0.4rem 0 0; color: var(--error); }
+.acct-msg.ok { color: var(--accent); }
