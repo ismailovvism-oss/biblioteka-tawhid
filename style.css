@@ -50,6 +50,11 @@ body {
   font: 17px/1.65 Georgia, "Times New Roman", serif;
 }
 
+/* В режиме чтения горизонтальный жест принадлежит приложению (смена глав), поэтому
+   браузерная навигация «назад/вперёд» свайпом здесь выключена: иначе тот же жест
+   уводил на карточку книги. Возврат остаётся кнопками и системной «назад». */
+body[data-view="reading"] { overscroll-behavior-x: contain; }
+
 button {
   font: inherit;
   color: inherit;
@@ -182,6 +187,9 @@ body[data-align="justify"] .member p { text-align: justify; }
 .member .table-wrap {
   margin: 0.6em 0; overflow-x: auto; -webkit-overflow-scrolling: touch;
   border: 1px solid var(--border); border-radius: 6px;
+  /* без этого прокрутка на упоре «протекает» наверх и браузер понимает жест как
+     «назад» — из главы улетало на карточку книги вместо следующей главы */
+  overscroll-behavior-x: contain;
 }
 .member .table-wrap table {
   border-collapse: collapse; width: 100%;
@@ -208,6 +216,7 @@ body[data-align="justify"] .member p { text-align: justify; }
   background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
   font-family: ui-monospace, "DejaVu Sans Mono", Menlo, Consolas, monospace;
   font-size: 0.88em; line-height: 1.45; white-space: pre; tab-size: 2;
+  overscroll-behavior-x: contain;   /* та же защита от жеста «назад», что у таблиц */
   /* формулы и схемы латинские — в RTL-книге блок всё равно читается слева направо */
   direction: ltr; text-align: left;
 }
