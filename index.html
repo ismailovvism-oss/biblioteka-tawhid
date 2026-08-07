@@ -235,11 +235,11 @@
   <button id="sel-err" type="button" title="Сообщить об ошибке в этом фрагменте — откроется письмо с уже заполненным местом (глава, сектор, страница)">✉ Ошибка?</button>
 </div>
 
-<div id="mt-menu" hidden></div>
-
 <!-- Машинный перевод живёт ТОЛЬКО здесь, поверх текста, и никогда не попадает
      в поток секторов: рядом стоит выверенный человеческий перевод, спутать их
-     нельзя. См. шапку translate.js. -->
+     нельзя. См. шапку translate.js.
+     Выбор провайдера — внутри карточки, а не отдельным всплывающим меню: меню
+     оказывалось ровно там же, где системное «Копировать / Поиск», и тонуло под ним. -->
 <div id="mt-card" hidden>
   <div class="mt-head">
     <span class="mt-badge">⚡ машинный перевод</span>
@@ -247,9 +247,12 @@
     <button id="mt-close" type="button" title="Закрыть">✕</button>
   </div>
   <div id="mt-body" class="mt-body"></div>
-  <div class="mt-actions">
-    <button id="mt-to-note" type="button">✎ В заметку</button>
-    <button id="mt-copy" type="button">⧉ Скопировать</button>
+  <div class="mt-foot">
+    <span id="mt-providers" class="mt-providers"></span>
+    <span class="mt-actions">
+      <button id="mt-to-note" type="button">✎ В заметку</button>
+      <button id="mt-copy" type="button">⧉ Копировать</button>
+    </span>
   </div>
 </div>
 

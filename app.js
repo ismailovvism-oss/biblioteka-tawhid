@@ -23,6 +23,7 @@ const DEFAULTS = {
   shelfFacets: {},     // активные фасеты: { langs:[], authors:[], era:[], tags:[] }
   last: {},            // bookId → { chapter, sector, page, ts }
   readDays: [],        // ['YYYY-MM-DD', …] — дни, когда что-то читали
+  mtProvider: 'mymemory',  // последний выбранный движок машинного перевода
   marks: {},           // bookId → [пометка] — см. «пометки» ниже
   collections: [],     // сквозные тематические сборники из пометок
   // ↓ старые ключи: читаются один раз при миграции в marks и больше не пишутся
@@ -1149,7 +1150,7 @@ bindSelAction($('#sel-note'), () => addRangeMark(DEFAULT_COLOR, true));
  * спутать их особенно дорого. Единственный мостик в книгу — кнопка «в заметку»,
  * которая кладёт текст в личную пометку пользователя, а не в текст книги.
  */
-let mtPending = null;   // { text, from, to } — что переводим
+let mtPending = null;   // { text, from, to, result }
 
 // куда переводим: второй язык книги, иначе русский
 function mtTargetFor(from) {
@@ -1160,12 +1161,19 @@ function mtTargetFor(from) {
   return from === 'ru' ? 'en' : 'ru';
 }
 
-function closeMt() {
-  $('#mt-card').hidden = true;
-  $('#mt-menu').hidden = true;
-}
+const mtProvider = () =>
+  (mtAvailable().find(p => p.id === settings.mtProvider && p.ready) || {}).id
+  || (mtAvailable().find(p => p.ready) || {}).id
+  || 'mymemory';
 
-function openMtMenu() {
+function closeMt() { $('#mt-card').hidden = true; }
+
+/* Переводим СРАЗУ, без промежуточного меню выбора.
+   Меню висело под панелью выделения — ровно там же, где браузер рисует своё
+   «Копировать / Поиск / Поделиться», и системное перекрывало наше. Провайдер
+   теперь переключается уже в карточке результата, а она прижата к низу экрана.
+   Выделение снимаем первым делом: это и системное меню убирает. */
+function startTranslate() {
   const sel = window.getSelection();
   if (!sel || sel.isCollapsed || !sel.rangeCount) return;
   const range = sel.getRangeAt(0);
@@ -1173,57 +1181,61 @@ function openMtMenu() {
   const member = el.closest('.member');
   if (!member) return;
   const from = member.getAttribute('lang') || (book && book.languages[0]) || 'en';
-  mtPending = { text: sel.toString().trim(), from, to: mtTargetFor(from) };
+  mtPending = { text: sel.toString().trim(), from, to: mtTargetFor(from), result: null };
+  runTranslate(mtProvider());
+}
 
-  const menu = $('#mt-menu');
-  menu.innerHTML = '';
+// переключатели провайдера внутри карточки
+function renderMtProviders(active) {
+  const box = $('#mt-providers');
+  if (!box) return;
+  box.innerHTML = '';
   for (const p of mtAvailable()) {
     const b = document.createElement('button');
     b.type = 'button';
-    b.className = 'mt-choice' + (p.ready ? '' : ' off');
-    b.disabled = !p.ready;
-    const name = document.createElement('b');
-    name.textContent = p.label;
-    const note = document.createElement('span');
-    note.textContent = p.ready ? p.note : p.note + ' — не настроен';
-    b.append(name, note);
-    if (p.ready) bindSelAction(b, () => runTranslate(p.id));
-    menu.appendChild(b);
+    b.className = 'mt-prov' + (p.id === active ? ' on' : '') + (p.ready ? '' : ' off');
+    b.textContent = p.label;
+    b.title = p.ready ? p.note : p.note + ' — не настроен';
+    b.disabled = !p.ready || p.id === active;
+    b.addEventListener('click', () => runTranslate(p.id));
+    box.appendChild(b);
   }
-  const bar = $('#sel-toolbar').getBoundingClientRect();
-  menu.hidden = false;
-  menu.style.top = Math.min(window.innerHeight - menu.offsetHeight - 8, bar.bottom + 6) + 'px';
-  menu.style.left = Math.max(6, Math.min(window.innerWidth - menu.offsetWidth - 6, bar.left)) + 'px';
 }
 
 async function runTranslate(providerId) {
   if (!mtPending) return;
   const { text, from, to } = mtPending;
-  $('#mt-menu').hidden = true;
-  hideSelToolbar();
-  window.getSelection().removeAllRanges();
+  settings.mtProvider = providerId;
+  saveSettings();
 
-  const card = $('#mt-card');
+  // снять выделение сразу — заодно закрывается системное меню браузера
+  hideSelToolbar();
+  const s = window.getSelection();
+  if (s) s.removeAllRanges();
+
   const body = $('#mt-body');
   $('#mt-source').textContent = `${langName(from)} → ${langName(to)}`;
   body.textContent = 'Перевожу…';
   body.classList.remove('mt-error');
-  card.hidden = false;
+  renderMtProviders(providerId);
+  $('#mt-card').hidden = false;
 
   try {
     const r = await mtTranslate(text, from, to, providerId);
     body.textContent = r.text;
     $('#mt-source').textContent =
-      `${langName(from)} → ${langName(to)} · ${r.provider.label}${r.cached ? ' · из кэша' : ''}`;
+      `${langName(from)} → ${langName(to)}${r.cached ? ' · из кэша' : ''}`;
     mtPending.result = r.text;
   } catch (err) {
     body.textContent = err.message;
     body.classList.add('mt-error');
     mtPending.result = null;
   }
+  // провайдер мог погаснуть на неудаче (нет функции / нет ключа) — перерисуем
+  renderMtProviders(providerId);
 }
 
-bindSelAction($('#sel-mt'), openMtMenu);
+bindSelAction($('#sel-mt'), startTranslate);
 bindClick('#mt-close', closeMt);
 bindClick('#mt-copy', () => {
   const t = mtPending && mtPending.result;
@@ -1249,7 +1261,6 @@ bindClick('#mt-to-note', () => {
   closeMt();
   toast('Сохранено в пометки');
 });
-
 /* ===== ВЫРЕЗКИ: сквозной свод пометок по всем книгам =====
  * Полка отвечает на вопрос «что почитать», вырезки — на вопрос «что я об этом думал».
  * Поэтому это отдельный раздел, а не вкладка внутри книги: мысль по теме почти всегда
