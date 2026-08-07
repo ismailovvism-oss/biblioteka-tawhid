@@ -1138,3 +1138,88 @@ mark.hl.has-note { box-shadow: inset 0 -0.14em 0 var(--accent); }
 }
 .sheet label.stack > small { color: var(--muted); font-size: 0.8rem; }
 .sheet label.stack input, .sheet label.stack textarea { margin-top: 0.25rem; max-width: none; }
+
+/* ===== панель полки: поиск, порядок, виды, счётчик ===== */
+.shelf-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: 46rem;
+  margin: 0.5rem auto 0.2rem;
+}
+.shelf-search {
+  flex: 1 1 12rem;
+  min-width: 0;
+  padding: 0.4rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+  font-size: 0.9rem;
+}
+.shelf-sort {
+  flex: 0 0 auto;
+  padding: 0.35rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.82rem;
+}
+/* переключатель видов встал внутрь панели — свой верхний отступ ему больше не нужен */
+.shelf-bar .view-switch { margin: 0; flex: 0 0 auto; }
+.shelf-count {
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  padding-inline-start: 0.1rem;
+}
+
+/* маячок досыпки списка: место под него нужно, видимым он быть не должен */
+.shelf-sentinel { height: 1px; }
+
+/* Строка списка стала двухэтажной: название и под ним автор с разделом.
+   Поэтому выравнивание по верху, а не по центру. */
+.book-row { align-items: flex-start; }
+.book-row .br-main { flex: 1 1 auto; min-width: 0; display: block; }
+.book-row .br-title {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.3;
+}
+.book-row .br-meta {
+  display: block;
+  margin-top: 0.12rem;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.book-row .br-meta b { font-weight: 600; color: color-mix(in srgb, var(--fg) 62%, var(--muted)); }
+
+/* ===== фильтр оглавления ===== */
+#toc-filter {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 0.4rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+  font-size: 0.88rem;
+}
+/* отфильтрованный список плоский: отступы уровней сняты, вместо них путь под названием */
+.toc-li.toc-flat { padding-inline-start: 0.3rem; }
+.toc-flat .toc-link { flex-direction: column; align-items: flex-start; gap: 0.1rem; }
+.toc-trail { font-size: 0.72rem; color: var(--muted); }
+.toc-none { padding: 0.7rem 0.3rem; color: var(--muted); font-size: 0.88rem; }

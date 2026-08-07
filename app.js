@@ -566,15 +566,25 @@ function nextReadable(from, dir) {
   return -1;
 }
 let tocCollapsed = new Set();   // индексы свёрнутых групп текущей книги
+let tocQuery = '';              // фильтр по названиям глав
 function buildToc() {
   tocCollapsed = new Set();
+  tocQuery = '';
+  const f = $('#toc-filter');
+  if (f) { f.value = ''; f.hidden = book.chapters.length < 12; }  // на короткой книге незачем
   $('#toc-book-title').textContent = pickTitle(book.title);
   tocRangesFilled = false;
   renderTocList();
 }
+
+/* Фильтр оглавления. Пока он пуст — обычное дерево с уровнями и сворачиванием.
+   Как только что-то введено, дерево разворачивается в ПЛОСКИЙ список совпавших глав:
+   иерархия при фильтрации только мешает — родительские группы обычно не совпадают
+   с запросом, и совпавшие главы оказались бы спрятаны под ними. */
 function renderTocList() {
   const ul = $('#toc-list');
   ul.innerHTML = '';
+  if (tocQuery) return renderTocFiltered(ul);
   let hideBelow = Infinity;
   book.chapters.forEach((ch, i) => {
     const lvl = chLevel(ch);
@@ -611,6 +621,50 @@ function renderTocList() {
     }
     ul.appendChild(li);
   });
+  markTocCurrent();
+}
+
+function renderTocFiltered(ul) {
+  const words = normalize(tocQuery).split(/\s+/).filter(Boolean);
+  // путь групп над главой — чтобы в плоском списке было видно, откуда она
+  const trail = i => {
+    const out = [];
+    let lvl = chLevel(book.chapters[i]);
+    for (let j = i - 1; j >= 0 && lvl > 0; j--) {
+      const l = chLevel(book.chapters[j]);
+      if (l < lvl && !chHasFile(book.chapters[j])) { out.unshift(tocTitle(book.chapters[j].title)); lvl = l; }
+    }
+    return out;
+  };
+  let found = 0;
+  book.chapters.forEach((ch, i) => {
+    if (!chHasFile(ch)) return;                 // группы сами по себе не открыть
+    const title = tocTitle(ch.title);
+    const hay = normalize(title + ' ' + trail(i).join(' '));
+    if (!words.every(w => hay.includes(w))) return;
+    found++;
+    const li = document.createElement('li');
+    li.className = 'toc-li toc-l0 toc-flat';
+    li.dataset.ci = i;
+    const btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'toc-link';
+    const t = document.createElement('span'); t.className = 'toc-title'; t.textContent = title;
+    btn.appendChild(t);
+    const path = trail(i);
+    if (path.length) {
+      const p = document.createElement('span'); p.className = 'toc-trail'; p.textContent = path.join(' › ');
+      btn.appendChild(p);
+    }
+    btn.addEventListener('click', () => { $('#toc').hidden = true; consumeOverlayMark(); loadChapter(i); });
+    li.appendChild(btn);
+    ul.appendChild(li);
+  });
+  if (!found) {
+    const li = document.createElement('li');
+    li.className = 'toc-none';
+    li.textContent = `Глав по запросу «${tocQuery}» нет.`;
+    ul.appendChild(li);
+  }
   markTocCurrent();
 }
 
@@ -1781,6 +1835,14 @@ function consumeOverlayMark() {
   if (overlayMark && !anyPopupOpen()) { overlayMark = false; suppressPop = true; history.back(); }
 }
 $('#btn-toc').addEventListener('click', () => { openOverlay($('#toc')); fillPageRanges(); });
+if ($('#toc-filter')) {
+  let tocTimer = null;
+  $('#toc-filter').addEventListener('input', e => {
+    tocQuery = e.target.value.trim();
+    clearTimeout(tocTimer);
+    tocTimer = setTimeout(() => { renderTocList(); fillPageRanges(); }, 100);
+  });
+}
 $('#btn-settings').addEventListener('click', () => { openOverlay($('#settings')); });
 document.querySelectorAll('.overlay').forEach(ov => {
   ov.addEventListener('click', e => { if (e.target === ov) { ov.hidden = true; consumeOverlayMark(); } });
@@ -2295,8 +2357,17 @@ function renderFilterSheet() {
   const underCat = library.filter(e => entryInCat(e, cat));
   let any = false;
   for (const f of FACETS) {
+    /* Считаем значения по книгам, прошедшим ВСЕ ОСТАЛЬНЫЕ группы фасетов, а не по
+       всему разделу. Иначе чипс обещает «Ханафитский · 87», а вместе с уже выбранным
+       языком даёт пусто — и фильтр приходится откатывать вручную. Свою группу из
+       расчёта исключаем: внутри неё ИЛИ, и её значения должны оставаться доступными. */
+    const others = {};
+    for (const g of FACETS) if (g.key !== f.key && facets[g.key] && facets[g.key].length) others[g.key] = facets[g.key];
+    const pool = underCat.filter(e => entryMatchesFacets(e, others));
     const counts = new Map();
-    for (const e of underCat) for (const v of entryFacetVals(e, f.key)) counts.set(v, (counts.get(v) || 0) + 1);
+    for (const e of pool) for (const v of entryFacetVals(e, f.key)) counts.set(v, (counts.get(v) || 0) + 1);
+    // выбранное значение показываем всегда, даже если сейчас оно даёт ноль — иначе снять его нечем
+    for (const v of facets[f.key] || []) if (!counts.has(v)) counts.set(v, 0);
     const sel = facets[f.key] || [];
     if (counts.size < 2 && !sel.length) continue;
     any = true;
@@ -2320,6 +2391,67 @@ function renderFilterSheet() {
     grp.appendChild(chips); body.appendChild(grp);
   }
   if (!any) { const m = document.createElement('div'); m.className = 'facet-empty'; m.textContent = 'Для этого раздела фильтров нет.'; body.appendChild(m); }
+}
+
+/* ===== поиск и порядок на полке =====
+ * Дерево разделов отвечает на вопрос «что тут вообще есть». На тысячах книг чаще
+ * спрашивают другое — «где вот это», и отвечает на такое поиск. Поэтому он живёт
+ * прямо на полке, а не только в отдельной панели полнотекстового поиска по главам.
+ */
+let shelfQuery = '';   /* намеренно НЕ в settings: сохранённый между запусками фильтр
+                          при следующем запуске выглядит как «библиотека опустела» */
+const SHELF_SORTS = [
+  { id: 'manual', label: 'как в реестре' },
+  { id: 'title', label: 'по названию' },
+  { id: 'author', label: 'по автору' },
+  { id: 'recent', label: 'сначала читаемые' },
+];
+const shelfSort = () =>
+  SHELF_SORTS.some(s => s.id === settings.shelfSort) ? settings.shelfSort : 'manual';
+
+/* Строка, по которой ищем: название на всех языках, авторы, теги, жанр, путь раздела.
+   Нормализуем тем же foldChar, что и поиск по тексту, — значит арабское название
+   находится без огласовок, а русское без учёта регистра и «ё».
+   Кэш нужен, чтобы не пересобирать это для каждой книги на каждое нажатие клавиши. */
+const haystackCache = new WeakMap();
+function entryHaystack(e) {
+  let h = haystackCache.get(e);
+  if (h === undefined) {
+    h = normalize([
+      ...Object.values(e.title || {}),
+      ...(e.authors || []),
+      ...(e.tags || []),
+      ...(e.genre || []),
+      ...(e.madhhab || []),
+      ...bookCatPath(e),
+      e.id,
+    ].filter(Boolean).join(' '));
+    haystackCache.set(e, h);
+  }
+  return h;
+}
+function entryMatchesQuery(e, q) {
+  if (!q) return true;
+  // все слова запроса должны найтись — так «навави шарх» сужает, а не расширяет
+  const words = normalize(q).split(/\s+/).filter(Boolean);
+  const hay = entryHaystack(e);
+  return words.every(w => hay.includes(w));
+}
+
+const cmpRu = (a, b) => String(a).localeCompare(String(b), 'ru');
+function sortShelf(list) {
+  const mode = shelfSort();
+  if (mode === 'manual') return list;   // порядок реестра — авторская расстановка
+  const out = list.slice();
+  if (mode === 'title') out.sort((a, b) => cmpRu(entryLabel(a), entryLabel(b)));
+  else if (mode === 'author') {
+    const au = e => (Array.isArray(e.authors) && e.authors[0]) || '￿';  // без автора — в конец
+    out.sort((a, b) => cmpRu(au(a), au(b)) || cmpRu(entryLabel(a), entryLabel(b)));
+  } else if (mode === 'recent') {
+    const ts = e => (getLast(e.id) || {}).ts || 0;
+    out.sort((a, b) => ts(b) - ts(a) || cmpRu(entryLabel(a), entryLabel(b)));
+  }
+  return out;
 }
 
 /* ===== три вида списка книг: обложки / корешки / список ===== */
@@ -2354,60 +2486,147 @@ function coverInto(host, e, alt) {
     host.appendChild(img);
   } else host.appendChild(genCover(e));
 }
-function renderBookList(shown, view) {
-  if (view === 'spines') {
-    const shelf = document.createElement('div'); shelf.className = 'spineshelf';
-    for (const e of shown) {
-      const { bg, edge } = spineColor(e); const { width, height } = spineDims(e);
-      const sp = document.createElement('button'); sp.type = 'button'; sp.className = 'spine';
-      sp.style.width = width + 'px'; sp.style.height = height + '%';
-      sp.style.background = `linear-gradient(90deg, ${edge}, ${bg} 16%, ${bg} 84%, ${edge})`;
-      sp.title = entryLabel(e);
-      if (e.review && APPROVAL[e.review]) {
-        const st = document.createElement('span');
-        st.className = 'spine-stripe ' + (e.review === 'approved' ? 'st-ok' : 'st-warn');
-        sp.appendChild(st);
-      }
-      const t = document.createElement('span'); t.className = 'spine-title'; t.textContent = entryLabel(e);
-      sp.appendChild(t);
-      sp.addEventListener('click', () => openInfoFor(e));
-      shelf.appendChild(sp);
-    }
-    stream.appendChild(shelf);
-    return;
+/* ── одна запись в каждом из трёх видов ─────────────────────────────────── */
+function spineItem(e) {
+  const { bg, edge } = spineColor(e); const { width, height } = spineDims(e);
+  const sp = document.createElement('button'); sp.type = 'button'; sp.className = 'spine';
+  sp.style.width = width + 'px'; sp.style.height = height + '%';
+  sp.style.background = `linear-gradient(90deg, ${edge}, ${bg} 16%, ${bg} 84%, ${edge})`;
+  sp.title = entryLabel(e);
+  if (e.review && APPROVAL[e.review]) {
+    const st = document.createElement('span');
+    st.className = 'spine-stripe ' + (e.review === 'approved' ? 'st-ok' : 'st-warn');
+    sp.appendChild(st);
   }
-  if (view === 'list') {
-    const list = document.createElement('div'); list.className = 'booklist';
-    for (const e of shown) {
-      const row = document.createElement('button'); row.type = 'button'; row.className = 'book-row';
-      const thumb = document.createElement('span'); thumb.className = 'br-thumb'; coverInto(thumb, e, '');
-      const title = document.createElement('span'); title.className = 'br-title'; title.textContent = entryLabel(e);
-      const status = document.createElement('span'); status.className = 'br-status'; applyBadges(status, e, false);
-      row.append(thumb, title, status);
-      row.addEventListener('click', () => openInfoFor(e));
-      list.appendChild(row);
+  const t = document.createElement('span'); t.className = 'spine-title'; t.textContent = entryLabel(e);
+  sp.appendChild(t);
+  sp.addEventListener('click', () => openInfoFor(e));
+  return sp;
+}
+
+/* Строка списка. Самый ёмкий вид — и потому самый нагруженный смыслом: автор,
+   раздел и языки прямо здесь. Без них на тысячах книг список не читается: одни
+   названия не дают отличить пять «Шархов» друг от друга. */
+function listItem(e) {
+  const row = document.createElement('button'); row.type = 'button'; row.className = 'book-row';
+  const thumb = document.createElement('span'); thumb.className = 'br-thumb'; coverInto(thumb, e, '');
+
+  const main = document.createElement('span'); main.className = 'br-main';
+  const title = document.createElement('span'); title.className = 'br-title'; title.textContent = entryLabel(e);
+  main.appendChild(title);
+
+  const bits = [];
+  const author = (Array.isArray(e.authors) && e.authors.filter(Boolean).join(', ')) || '';
+  const path = bookCatPath(e);
+  if (path.length) bits.push(path[path.length - 1]);
+  if (Array.isArray(e.langs) && e.langs.length) bits.push(e.langs.map(l => l.toUpperCase()).join('+'));
+  if (Array.isArray(e.genre) && e.genre.length) bits.push(e.genre.join(', '));
+  if (author || bits.length) {
+    const meta = document.createElement('span'); meta.className = 'br-meta';
+    if (author) {
+      const a = document.createElement('b'); a.textContent = author;
+      meta.appendChild(a);
+      if (bits.length) meta.append(' · ');
     }
-    stream.appendChild(list);
-    return;
+    if (bits.length) meta.append(bits.join(' · '));
+    main.appendChild(meta);
   }
-  // обложки (по умолчанию): полка с обложками
-  const shelf = document.createElement('div'); shelf.className = 'shelf';
-  for (const e of shown) {
-    const cell = document.createElement('div'); cell.className = 'shelf-item';
-    const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'cover';
-    btn.title = entryLabel(e); btn.setAttribute('aria-label', entryLabel(e));
-    coverInto(btn, e, entryLabel(e));
-    const l = getLast(e.id);
-    if (l && (l.page != null || l.sector)) {
-      const note = document.createElement('span'); note.className = 'cover-badge';
-      note.textContent = l.page != null ? `стр. ${l.page}` : '⋯';
-      btn.appendChild(note);
+
+  const status = document.createElement('span'); status.className = 'br-status'; applyBadges(status, e, false);
+  row.append(thumb, main, status);
+  row.addEventListener('click', () => openInfoFor(e));
+  return row;
+}
+
+function coverItem(e) {
+  const cell = document.createElement('div'); cell.className = 'shelf-item';
+  const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'cover';
+  btn.title = entryLabel(e); btn.setAttribute('aria-label', entryLabel(e));
+  coverInto(btn, e, entryLabel(e));
+  const l = getLast(e.id);
+  if (l && (l.page != null || l.sector)) {
+    const note = document.createElement('span'); note.className = 'cover-badge';
+    note.textContent = l.page != null ? `стр. ${l.page}` : '⋯';
+    btn.appendChild(note);
+  }
+  applyBadges(btn, e, false);
+  btn.addEventListener('click', () => openInfoFor(e));
+  cell.appendChild(btn);
+  return cell;
+}
+
+/* ── список порциями ────────────────────────────────────────────────────────
+ * Раньше сюда клали в DOM все книги разом. На десятке это незаметно, на тысячах
+ * страница просто не открывается — поэтому рисуем окно и досыпаем по мере
+ * прокрутки. Досыпка через IntersectionObserver, а не через обработчик scroll:
+ * тот срабатывает на каждый кадр и сам становится тормозом.
+ */
+const SHELF_CHUNK = 60;
+let shelfObserver = null;
+let shelfOnScroll = null;
+
+function renderBookList(shown, view, host) {
+  if (shelfObserver) { shelfObserver.disconnect(); shelfObserver = null; }
+  if (shelfOnScroll) { window.removeEventListener('scroll', shelfOnScroll); shelfOnScroll = null; }
+
+  const make = view === 'spines' ? spineItem : view === 'list' ? listItem : coverItem;
+  const box = document.createElement('div');
+  box.className = view === 'spines' ? 'spineshelf' : view === 'list' ? 'booklist' : 'shelf';
+  host.appendChild(box);
+
+  const sentinel = document.createElement('div');
+  sentinel.className = 'shelf-sentinel';
+  host.appendChild(sentinel);
+
+  let i = 0;
+
+  /* Одной порции может не хватить, чтобы дотянуться до низа экрана. Наблюдатель сам
+     об этом не сообщит: он срабатывает на ИЗМЕНЕНИЕ пересечения, а маячок как был
+     виден, так и остался. Поэтому после каждой порции переподписываемся — наблюдатель
+     заново проверит маячок и позовёт нас, если тот всё ещё в кадре.
+
+     ⚠️ Не заменять это на цикл «досыпать, пока getBoundingClientRect выше сгиба»:
+     такой цикл синхронный, меряет раскладку на каждой итерации и в худшем случае
+     отрисовывает весь список разом — то есть ровно то, от чего мы уходим. Проверено
+     на 3000 книг: вкладка вешалась намертво. Здесь же между порциями отдаём кадр
+     браузеру, и прокрутка остаётся живой. */
+  const pump = () => {
+    const end = Math.min(i + SHELF_CHUNK, shown.length);
+    const frag = document.createDocumentFragment();
+    for (; i < end; i++) frag.appendChild(make(shown[i]));
+    box.appendChild(frag);
+
+    if (i >= shown.length) {
+      if (shelfObserver) { shelfObserver.disconnect(); shelfObserver = null; }
+      if (shelfOnScroll) { window.removeEventListener('scroll', shelfOnScroll); shelfOnScroll = null; }
+      sentinel.remove();
+      return;
     }
-    applyBadges(btn, e, false);
-    btn.addEventListener('click', () => openInfoFor(e));
-    cell.appendChild(btn); shelf.appendChild(cell);
-  }
-  stream.appendChild(shelf);
+    /* Переподписка синхронная, без requestAnimationFrame: в фоновой вкладке кадры не
+       выдаются вовсе, и досыпка на rAF там встала бы намертво. Наблюдатель сообщает
+       асинхронно, поэтому браузер всё равно успевает отрисовать порцию между вызовами,
+       а цикл сам останавливается, как только маячок уходит из кадра. */
+    if (shelfObserver && sentinel.isConnected) {
+      shelfObserver.unobserve(sentinel);
+      shelfObserver.observe(sentinel);
+    }
+  };
+
+  shelfObserver = new IntersectionObserver(entries => {
+    if (entries.some(x => x.isIntersecting)) pump();
+  }, { rootMargin: '400px' });
+  shelfObserver.observe(sentinel);
+
+  /* Запасной путь. IntersectionObserver — основной, но он не везде доходит: в части
+     встроенных webview его придушивают, а в фоновой вкладке не доставляют вовсе.
+     Здесь ровно ОДИН замер на событие прокрутки и никакого цикла: досыпали порцию —
+     маячок ушёл вниз, следующее событие уже ничего не сделает, пока не долистают. */
+  shelfOnScroll = () => {
+    if (sentinel.isConnected && sentinel.getBoundingClientRect().top < window.innerHeight + 400) pump();
+  };
+  window.addEventListener('scroll', shelfOnScroll, { passive: true });
+
+  pump();
 }
 
 function renderLibrary() {
@@ -2471,10 +2690,32 @@ function renderLibrary() {
   stream.appendChild(panel);
   updateFilterBadge();
 
-  const shown = underCat.filter(e => entryMatchesFacets(e, facets));
-
   // переключатель видов (запоминается в settings.shelfView)
   const view = ['covers', 'spines', 'list'].includes(settings.shelfView) ? settings.shelfView : (settings.shelfView = 'covers');
+
+  /* Панель полки: поиск, порядок, виды, счётчик. Строится ОДИН раз, а при вводе
+     перерисовывается только список — иначе поле поиска пересоздавалось бы на каждой
+     букве и теряло фокус вместе с кареткой. */
+  const bar = document.createElement('div');
+  bar.className = 'shelf-bar';
+
+  const q = document.createElement('input');
+  q.type = 'search';
+  q.className = 'shelf-search';
+  q.placeholder = 'Название, автор, тема…';
+  q.value = shelfQuery;
+  q.setAttribute('aria-label', 'Поиск по полке');
+
+  const sort = document.createElement('select');
+  sort.className = 'shelf-sort';
+  sort.setAttribute('aria-label', 'Порядок книг');
+  for (const s of SHELF_SORTS) {
+    const o = document.createElement('option');
+    o.value = s.id; o.textContent = s.label;
+    if (s.id === shelfSort()) o.selected = true;
+    sort.appendChild(o);
+  }
+
   const sw = document.createElement('div'); sw.className = 'view-switch';
   for (const [v, ico, lab] of [['covers', '▦', 'Обложки'], ['spines', '📚', 'Корешки'], ['list', '☰', 'Список']]) {
     const b = document.createElement('button'); b.type = 'button';
@@ -2483,16 +2724,47 @@ function renderLibrary() {
     b.addEventListener('click', () => { settings.shelfView = v; saveSettings(); renderLibrary(); });
     sw.appendChild(b);
   }
-  stream.appendChild(sw);
 
-  if (!shown.length) {
-    const m = document.createElement('div');
-    m.className = 'shelf-empty';
-    m.textContent = 'По выбранным фильтрам книг нет.';
-    stream.appendChild(m);
-  } else {
-    renderBookList(shown, view);
-  }
+  const count = document.createElement('span');
+  count.className = 'shelf-count';
+
+  bar.append(q, sort, sw, count);
+  stream.appendChild(bar);
+
+  const body = document.createElement('div');
+  body.className = 'shelf-body';
+  stream.appendChild(body);
+
+  const paint = () => {
+    const shown = sortShelf(underCat.filter(e =>
+      entryMatchesFacets(e, facets) && entryMatchesQuery(e, shelfQuery)));
+    // «показано из скольких» — иначе непонятно, фильтр отсёк или книг столько и есть
+    count.textContent = shown.length === underCat.length
+      ? `${underCat.length}`
+      : `${shown.length} / ${underCat.length}`;
+    body.innerHTML = '';
+    if (!shown.length) {
+      const m = document.createElement('div');
+      m.className = 'shelf-empty';
+      m.textContent = shelfQuery ? `Ничего не нашлось по запросу «${shelfQuery}».` : 'По выбранным фильтрам книг нет.';
+      body.appendChild(m);
+    } else {
+      renderBookList(shown, view, body);
+    }
+  };
+
+  let qTimer = null;
+  q.addEventListener('input', () => {
+    shelfQuery = q.value.trim();
+    clearTimeout(qTimer);
+    qTimer = setTimeout(paint, 120);   // не перерисовывать список на каждое нажатие
+  });
+  sort.addEventListener('change', () => {
+    settings.shelfSort = sort.value;
+    saveSettings();
+    paint();
+  });
+  paint();
   // подпись внизу полки (почта — только в «О приложении», не на главной)
   const brand = document.createElement('div');
   brand.className = 'brand';
