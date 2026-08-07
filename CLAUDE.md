@@ -179,7 +179,7 @@ node tools/validate.js books/tawfiq
 - Разработка — в ветке сессии (`claude/...`); по готовности **fast-forward в `master`**
   (это «опубликованная» ветка). НЕ пушить в чужие ветки без явного разрешения.
 - **Бампать `VERSION` в `sw.js`** при изменении файлов оболочки (`index.html`, `app.js`,
-  `parser.js`, `style.css`) — иначе PWA-клиенты не обновятся. Сейчас `chitalka-v39`.
+  `parser.js`, `style.css`) — иначе PWA-клиенты не обновятся. Сейчас `chitalka-v40`.
 - **Деплой: GitHub Pages, автоматом на push в `master`** (2026-07-16; ушли с Netlify —
   там автодеплой был выключен из-за лимита кредитов и выкладка шла вручную build-hook’ом).
   Workflow — `.github/workflows/pages.yml`: сборки нет, репозиторий выкладывается как есть;

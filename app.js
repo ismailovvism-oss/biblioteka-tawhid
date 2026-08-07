@@ -1057,13 +1057,27 @@ document.addEventListener('selectionchange', () => {
 });
 
 /* Цветные кнопки панели выделения. mousedown/touchstart с preventDefault — иначе
-   касание снимет выделение раньше, чем мы успеем его прочитать. */
+   касание снимет выделение раньше, чем мы успеем его прочитать.
+
+   ⚠️ Узла может не быть. Сборки нет, index.html и app.js — два отдельных файла, и
+   браузер (или кеш) вполне может отдать их разных поколений: старая разметка + новый
+   скрипт. Раньше это валило ВСЁ приложение — исключение на верхнем уровне обрывало
+   выполнение файла, до init() дело не доходило, и вместо библиотеки был пустой экран.
+   Поэтому привязки к необязательным узлам молча пропускаются: пропавшая кнопка —
+   мелкая неприятность, пустая библиотека — поломка. */
 function bindSelAction(el, fn) {
+  if (!el) return;
   el.addEventListener('mousedown', e => { e.preventDefault(); fn(); });
   el.addEventListener('touchstart', e => { e.preventDefault(); fn(); }, { passive: false });
 }
+// то же и для обычных кнопок новых панелей
+function bindClick(sel, fn) {
+  const el = $(sel);
+  if (el) el.addEventListener('click', fn);
+}
 (function buildSelPalette() {
   const pal = $('#sel-colors');
+  if (!pal) return;
   for (const c of MARK_COLORS) {
     const b = document.createElement('button');
     b.type = 'button';
@@ -1306,12 +1320,12 @@ function copyCollection(c) {
   else toast('Буфер обмена недоступен');
 }
 
-$('#clips-tab-all').addEventListener('click', () => { clipsUI.tab = 'all'; clipsUI.coll = null; renderClips(); });
-$('#clips-tab-colls').addEventListener('click', () => { clipsUI.tab = 'colls'; renderClips(); });
-$('#clips-q').addEventListener('input', e => { clipsUI.q = e.target.value.trim(); renderClips(); });
-$('#btn-clips').addEventListener('click', openClips);
-$('#mark-save').addEventListener('click', saveMarkEditor);
-$('#mark-delete').addEventListener('click', () => {
+bindClick('#clips-tab-all', () => { clipsUI.tab = 'all'; clipsUI.coll = null; renderClips(); });
+bindClick('#clips-tab-colls', () => { clipsUI.tab = 'colls'; renderClips(); });
+if ($('#clips-q')) $('#clips-q').addEventListener('input', e => { clipsUI.q = e.target.value.trim(); renderClips(); });
+bindClick('#btn-clips', openClips);
+bindClick('#mark-save', saveMarkEditor);
+bindClick('#mark-delete', () => {
   if (!editingMark) return;
   const { book: bid, id } = editingMark;
   if (bid === bookId) removeMark(id);
@@ -1326,7 +1340,7 @@ $('#mark-delete').addEventListener('click', () => {
   renderClips();
   buildMarkPanel();
 });
-$('#mark-tags').addEventListener('input', renderTagSuggest);
+if ($('#mark-tags')) $('#mark-tags').addEventListener('input', renderTagSuggest);
 
 /* «Сообщить об ошибке»: выделенный фрагмент → письмо с местом (глава/сектор/страница/язык).
    Адрес берётся из book.json (feedbackEmail) — у книг без адреса кнопка скрыта. */
