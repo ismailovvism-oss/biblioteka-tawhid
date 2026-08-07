@@ -3050,7 +3050,15 @@ $('#acc-form').addEventListener('submit', async e => {
     $('#acc-state').textContent = 'Ссылка отправлена на ' + email + '. Откройте её на этом устройстве.';
     $('#acc-form').hidden = true;
   } catch (err) {
-    $('#acc-state').textContent = 'Не получилось отправить ссылку: ' + err.message;
+    /* Самая частая ошибка здесь выглядит бессмысленно. Публичная регистрация закрыта,
+       и клиент просит ссылку с create_user:false — тогда на НЕизвестную почту GoTrue
+       отвечает «Signups not allowed for otp». По этой строке нипочём не догадаться,
+       что дело всего лишь в опечатке в адресе, поэтому переводим её по-человечески. */
+    const unknownMail = err.code === 'otp_disabled' || err.code === 'signup_disabled'
+      || /signups not allowed/i.test(err.message || '');
+    $('#acc-state').textContent = unknownMail
+      ? `Почта ${email} не заведена в библиотеке. Регистрация закрыта: ссылка приходит только на уже заведённый адрес — проверьте написание.`
+      : 'Не получилось отправить ссылку: ' + err.message;
   } finally {
     btn.disabled = false;
   }

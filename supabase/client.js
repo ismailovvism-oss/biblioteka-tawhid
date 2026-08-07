@@ -79,6 +79,7 @@ window.SB = (function () {
         || `HTTP ${res.status}`;
       const err = new Error(msg);
       err.status = res.status;
+      err.code = data && (data.error_code || data.code);   // GoTrue: otp_disabled и т.п.
       throw err;
     }
     return data;
