@@ -13,7 +13,7 @@
  * «ИИ» серым и не даёт нажать — публичная библиотека при этом работает как
  * работала (см. CLAUDE.md: бэкенд — надстройка, а не фундамент).
  */
-import Anthropic from 'npm:@anthropic-ai/sdk@0.68.0';
+import Anthropic from 'npm:@anthropic-ai/sdk@0.115.0';
 
 const LANG_NAMES: Record<string, string> = {
   ru: 'русский', en: 'английский', ar: 'арабский',
