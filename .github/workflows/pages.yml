@@ -26,6 +26,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Непубличные книги живут в books-private/ под .gitignore и на Pages попасть не
+      # должны. Проверяем ДО всего остального: выложенный по недосмотру личный текст
+      # уже не отозвать, а история git его сохранит навсегда.
+      - name: Непубличные книги не должны быть в репозитории
+        run: |
+          if [ -n "$(git ls-files books-private/)" ]; then
+            echo "::error::books-private/ попала под git — деплой остановлен."
+            git ls-files books-private/
+            exit 1
+          fi
+          echo "books-private/ вне репозитория ✓"
+
       # Контракт книг должен быть цел — иначе не выкладываем.
       - uses: actions/setup-node@v4
         with:
