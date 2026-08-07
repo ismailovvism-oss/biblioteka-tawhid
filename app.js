@@ -1143,6 +1143,113 @@ function bindClick(sel, fn) {
 })();
 bindSelAction($('#sel-note'), () => addRangeMark(DEFAULT_COLOR, true));
 
+/* ===== машинный перевод выделенного =====
+ * Показываем ТОЛЬКО карточкой поверх текста. В поток секторов машинный перевод
+ * не попадает никогда: рядом стоит выверенный человеческий перевод, и на арабском
+ * спутать их особенно дорого. Единственный мостик в книгу — кнопка «в заметку»,
+ * которая кладёт текст в личную пометку пользователя, а не в текст книги.
+ */
+let mtPending = null;   // { text, from, to } — что переводим
+
+// куда переводим: второй язык книги, иначе русский
+function mtTargetFor(from) {
+  if (book && Array.isArray(book.languages)) {
+    const other = book.languages.find(l => l !== from);
+    if (other) return other;
+  }
+  return from === 'ru' ? 'en' : 'ru';
+}
+
+function closeMt() {
+  $('#mt-card').hidden = true;
+  $('#mt-menu').hidden = true;
+}
+
+function openMtMenu() {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || !sel.rangeCount) return;
+  const range = sel.getRangeAt(0);
+  const el = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement;
+  const member = el.closest('.member');
+  if (!member) return;
+  const from = member.getAttribute('lang') || (book && book.languages[0]) || 'en';
+  mtPending = { text: sel.toString().trim(), from, to: mtTargetFor(from) };
+
+  const menu = $('#mt-menu');
+  menu.innerHTML = '';
+  for (const p of mtAvailable()) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'mt-choice' + (p.ready ? '' : ' off');
+    b.disabled = !p.ready;
+    const name = document.createElement('b');
+    name.textContent = p.label;
+    const note = document.createElement('span');
+    note.textContent = p.ready ? p.note : p.note + ' — не настроен';
+    b.append(name, note);
+    if (p.ready) bindSelAction(b, () => runTranslate(p.id));
+    menu.appendChild(b);
+  }
+  const bar = $('#sel-toolbar').getBoundingClientRect();
+  menu.hidden = false;
+  menu.style.top = Math.min(window.innerHeight - menu.offsetHeight - 8, bar.bottom + 6) + 'px';
+  menu.style.left = Math.max(6, Math.min(window.innerWidth - menu.offsetWidth - 6, bar.left)) + 'px';
+}
+
+async function runTranslate(providerId) {
+  if (!mtPending) return;
+  const { text, from, to } = mtPending;
+  $('#mt-menu').hidden = true;
+  hideSelToolbar();
+  window.getSelection().removeAllRanges();
+
+  const card = $('#mt-card');
+  const body = $('#mt-body');
+  $('#mt-source').textContent = `${langName(from)} → ${langName(to)}`;
+  body.textContent = 'Перевожу…';
+  body.classList.remove('mt-error');
+  card.hidden = false;
+
+  try {
+    const r = await mtTranslate(text, from, to, providerId);
+    body.textContent = r.text;
+    $('#mt-source').textContent =
+      `${langName(from)} → ${langName(to)} · ${r.provider.label}${r.cached ? ' · из кэша' : ''}`;
+    mtPending.result = r.text;
+  } catch (err) {
+    body.textContent = err.message;
+    body.classList.add('mt-error');
+    mtPending.result = null;
+  }
+}
+
+bindSelAction($('#sel-mt'), openMtMenu);
+bindClick('#mt-close', closeMt);
+bindClick('#mt-copy', () => {
+  const t = mtPending && mtPending.result;
+  if (!t) return;
+  if (navigator.clipboard) navigator.clipboard.writeText(t).then(() => toast('Скопировано'), () => toast('Не удалось'));
+});
+/* Единственный путь машинного перевода внутрь книги — личная пометка, и она
+   честно подписана как машинная: своя мысль и машинный черновик не должны
+   выглядеть одинаково, когда через полгода перечитываешь вырезки. */
+bindClick('#mt-to-note', () => {
+  const t = mtPending && mtPending.result;
+  if (!t || !book) return;
+  const list = markList();
+  list.push({
+    id: newMarkId(), chapter: chapterIndex, sector: activeEl ? activeEl.dataset.id : 's001',
+    lang: mtPending.from, start: null, end: null, color: null,
+    note: '[машинный перевод] ' + t, tags: ['машинный перевод'],
+    text: mtPending.text, page: currentPage(), ts: Date.now(), edited: 0,
+  });
+  saveSettings();
+  applyMarks();
+  buildMarkPanel();
+  closeMt();
+  toast('Сохранено в пометки');
+});
+
 /* ===== ВЫРЕЗКИ: сквозной свод пометок по всем книгам =====
  * Полка отвечает на вопрос «что почитать», вырезки — на вопрос «что я об этом думал».
  * Поэтому это отдельный раздел, а не вкладка внутри книги: мысль по теме почти всегда

@@ -10,12 +10,13 @@
  * Версию бампать при изменении оболочки — старый кеш чистится на activate.
  */
 
-const VERSION = 'chitalka-v42';
+const VERSION = 'chitalka-v43';
 const SHELL = [
   './',
   'index.html',
   'style.css',
   'parser.js',
+  'translate.js',
   'app.js',
   'supabase/config.js',
   'supabase/client.js',

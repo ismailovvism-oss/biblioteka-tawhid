@@ -231,7 +231,26 @@
 <div id="sel-toolbar" hidden>
   <span id="sel-colors" class="palette"></span>
   <button id="sel-note" type="button" title="Выделить и сразу записать мысль">✎ Заметка</button>
+  <button id="sel-mt" type="button" title="Машинный перевод выделенного фрагмента">⇄ Перевод</button>
   <button id="sel-err" type="button" title="Сообщить об ошибке в этом фрагменте — откроется письмо с уже заполненным местом (глава, сектор, страница)">✉ Ошибка?</button>
+</div>
+
+<div id="mt-menu" hidden></div>
+
+<!-- Машинный перевод живёт ТОЛЬКО здесь, поверх текста, и никогда не попадает
+     в поток секторов: рядом стоит выверенный человеческий перевод, спутать их
+     нельзя. См. шапку translate.js. -->
+<div id="mt-card" hidden>
+  <div class="mt-head">
+    <span class="mt-badge">⚡ машинный перевод</span>
+    <span id="mt-source" class="mt-source"></span>
+    <button id="mt-close" type="button" title="Закрыть">✕</button>
+  </div>
+  <div id="mt-body" class="mt-body"></div>
+  <div class="mt-actions">
+    <button id="mt-to-note" type="button">✎ В заметку</button>
+    <button id="mt-copy" type="button">⧉ Скопировать</button>
+  </div>
 </div>
 
 <div id="mark-editor" class="overlay" hidden>
@@ -274,6 +293,7 @@
 <div id="img-overlay" hidden><img id="img-scan" alt="Скан страницы"></div>
 
 <script src="parser.js"></script>
+<script src="translate.js"></script>
 <!-- бэкенд (BACKEND.md): публичные книги работают и без него — если config.js пуст
      или сеть недоступна, приложение просто остаётся в анонимном режиме -->
 <script src="supabase/config.js"></script>

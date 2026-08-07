@@ -203,9 +203,22 @@ window.SB = (function () {
     return CFG.url + '/storage/v1' + r.signedURL.replace(/^\/storage\/v1/, '');
   }
 
+  /* Edge Function того же проекта. Нужна там, где браузеру нельзя дать ключ:
+     сайт статический и лежит на Pages, так что всё платное (ИИ-перевод, разбор
+     арабского) ходит через функцию, а ключ живёт в её секретах. */
+  function functionUrl(name) {
+    if (!configured()) throw new Error('Бэкенд не настроен');
+    return CFG.url.replace(/\/+$/, '') + '/functions/v1/' + name;
+  }
+  // токен вошедшего, если есть: функция сможет отличить своего от анонима
+  async function functionHeaders(extra) {
+    return await authHeaders(Object.assign({ 'Content-Type': 'application/json' }, extra));
+  }
+
   return {
     configured, isSignedIn, currentUser,
     sendMagicLink, consumeAuthCallback, signOut,
     rest, signedUrl,
+    functionUrl, functionHeaders,
   };
 })();
