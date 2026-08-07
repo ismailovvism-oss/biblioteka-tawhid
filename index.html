@@ -22,6 +22,7 @@
   <button id="btn-toc" type="button" title="Оглавление">☰</button>
   <button id="btn-search" type="button" title="Поиск (по книге или по всей библиотеке)">🔍</button>
   <button id="btn-bookmark" type="button" title="Закладка на текущем месте">🔖</button>
+  <button id="btn-clips" type="button" title="Вырезки и сборники — всё, что вы выделили и записали">✂</button>
   <div id="chapter-title">Загрузка…</div>
   <button id="btn-warn" type="button" title="Ошибки контракта" hidden>⚠</button>
   <button id="btn-filter" type="button" title="Фильтры">⛃<span id="filter-count" class="filter-badge" hidden></span></button>
@@ -64,7 +65,7 @@
   <div class="sheet">
     <h2 id="toc-book-title"></h2>
     <section id="bm-section" hidden>
-      <h3 class="sheet-sub">Закладки</h3>
+      <h3 class="sheet-sub">Пометки <span id="bm-count" class="sub-count"></span></h3>
       <ul id="bm-list"></ul>
     </section>
     <h3 class="sheet-sub">Главы</h3>
@@ -162,6 +163,7 @@
       <li><b>☰</b> — оглавление и список закладок.</li>
       <li><b>🔍</b> — поиск по книге (оба языка; арабский — без учёта огласовок).</li>
       <li><b>🔖</b> — поставить/снять закладку на текущем месте.</li>
+      <li><b>✂</b> — вырезки и тематические сборники.</li>
       <li><b>⇅</b> — видимость языков: оба → только один → только другой → <b>самопроверка</b> в обе стороны (один язык за заглушкой — вспомни, тапни по абзацу, проверь себя).</li>
       <li><b>⚙</b> — настройки.</li>
       <li><b>‹ ›</b> — предыдущая / следующая глава.</li>
@@ -180,13 +182,17 @@
       <li><b>Шрифт, размер, интервал</b> — отдельно для каждого языка; плюс поля страницы.</li>
       <li><b>Две колонки</b> — ширина колонок и «RTL-язык справа».</li>
       <li><b>Порядок пары</b>, <b>выравнивание</b>, режим <b>сносок</b>.</li>
-      <li><b>Экспорт/Импорт</b> — резервная копия настроек и закладок в файл.</li>
+      <li><b>Экспорт/Импорт</b> — резервная копия настроек, пометок, вырезок и сборников в файл.</li>
     </ul>
 
-    <h3 class="sheet-sub">Закладки и выделения</h3>
+    <h3 class="sheet-sub">Пометки, вырезки, сборники</h3>
     <ul>
-      <li>🔖 — закладка на сектор; список и заметки — в оглавлении (☰). «<b>↗</b>» копирует ссылку на это место.</li>
-      <li>Выделите текст → кнопка «🖍 Выделить». Тап по выделению — убрать.</li>
+      <li><b>Выделите текст</b> → всплывёт панель: цветной кружок красит фрагмент, «<b>✎ Заметка</b>» сразу открывает поле для мысли.</li>
+      <li><b>Тап по выделению</b> — открыть пометку: сменить цвет, дописать заметку, навесить теги, положить в сборник. Удаление — там же, одним касанием ничего не пропадает.</li>
+      <li><b>🔖</b> — закладка на текущем месте (пометка без фрагмента). Все пометки книги — в оглавлении (☰); «<b>↗</b>» копирует ссылку на это место.</li>
+      <li><b>✂ Вырезки</b> — свод всего выделенного и записанного <b>по всем книгам сразу</b>, с поиском и фильтрами по книге, тегу и цвету.</li>
+      <li><b>Сборники</b> — подборки вырезок по теме, собранные из разных книг. Готовый сборник копируется как текст (markdown) — в заметки, в статью, в разговор.</li>
+      <li>Текст вырезки сохраняется <b>снимком</b>: подборка читается, даже если книга сейчас недоступна.</li>
     </ul>
 
     <h3 class="sheet-sub">Офлайн</h3>
@@ -222,8 +228,44 @@
 </div>
 
 <div id="sel-toolbar" hidden>
-  <button id="sel-hl" type="button" title="Выделить">🖍 Выделить</button>
+  <span id="sel-colors" class="palette"></span>
+  <button id="sel-note" type="button" title="Выделить и сразу записать мысль">✎ Заметка</button>
   <button id="sel-err" type="button" title="Сообщить об ошибке в этом фрагменте — откроется письмо с уже заполненным местом (глава, сектор, страница)">✉ Ошибка?</button>
+</div>
+
+<div id="mark-editor" class="overlay" hidden>
+  <div class="sheet">
+    <h2>Пометка</h2>
+    <p id="mark-where" class="mark-where"></p>
+    <blockquote id="mark-text" class="mark-text"></blockquote>
+    <span id="mark-colors" class="palette palette-lg"></span>
+    <label class="stack">Заметка
+      <textarea id="mark-note" rows="4" placeholder="Мысль, вопрос, возражение, связь с другим местом…"></textarea>
+    </label>
+    <label class="stack">Теги <small>через запятую</small>
+      <input id="mark-tags" type="text" placeholder="таухид, кияс, спорное">
+    </label>
+    <div id="mark-tag-suggest" class="chips" hidden></div>
+    <h3 class="sheet-sub">Сборники</h3>
+    <div id="mark-colls" class="chips"></div>
+    <div class="filter-actions">
+      <button id="mark-delete" type="button">🗑 Удалить</button>
+      <button id="mark-save" type="button" class="primary">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<div id="clips" class="overlay" hidden>
+  <div class="sheet">
+    <h2>Вырезки <span id="clips-count" class="sub-count"></span></h2>
+    <div class="chips clips-tabs">
+      <button id="clips-tab-all" type="button" class="chip on">Все пометки</button>
+      <button id="clips-tab-colls" type="button" class="chip">Сборники</button>
+    </div>
+    <input id="clips-q" type="search" placeholder="Искать в вырезках и заметках…" autocomplete="off">
+    <div id="clips-filters" class="clip-filters"></div>
+    <div id="clips-body"></div>
+  </div>
 </div>
 
 <div id="debug-panel" hidden></div>

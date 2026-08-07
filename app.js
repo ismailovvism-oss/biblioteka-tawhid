@@ -21,11 +21,42 @@ const DEFAULTS = {
   colRtl: true,        // в две колонки RTL-язык справа
   shelfCat: [],        // выбранный путь в дереве категорий ([] = корень)
   shelfFacets: {},     // активные фасеты: { langs:[], authors:[], era:[], tags:[] }
-  highlights: {},      // bookId → [ { chapter, id, lang, start, end, ts } ]
   last: {},            // bookId → { chapter, sector, page, ts }
-  bookmarks: {},       // bookId → [ { id, chapter, page, note, ts } ]
   readDays: [],        // ['YYYY-MM-DD', …] — дни, когда что-то читали
+  marks: {},           // bookId → [пометка] — см. «пометки» ниже
+  collections: [],     // сквозные тематические сборники из пометок
+  // ↓ старые ключи: читаются один раз при миграции в marks и больше не пишутся
+  highlights: {},
+  bookmarks: {},
 };
+
+/* ===== ПОМЕТКИ =====
+ * Одна сущность на всё: выделение, заметка, закладка и вырезка — это одна и та же
+ * запись, различающаяся заполненными полями. Раньше механизмов было два, и они
+ * не сходились: закладка умела заметку, но не знала фрагмента; выделение знало
+ * фрагмент, но заметку прицепить было некуда. Из-за этого нельзя было сделать
+ * главное — «выделил кусок и записал мысль».
+ *
+ *   { id, chapter, sector, lang, start, end, color, note, tags[], text, page, ts, edited }
+ *
+ *   start === null  → якорь на весь сектор (это ЗАКЛАДКА, места в тексте нет)
+ *   start !== null  → якорь на фрагмент    (ВЫДЕЛЕНИЕ; с note — ЗАМЕТКА)
+ *   text            → снимок самого фрагмента на момент создания
+ *
+ * Зачем хранить `text`, хотя его можно достать по якорю: ВЫРЕЗКА должна читаться
+ * без книги — в общем списке, в сборнике, в выгрузке. Книга может быть приватной
+ * (нет сети), переимпортированной (сдвинулись смещения) или вовсе удалённой, а
+ * мысль, ради которой фрагмент сохраняли, теряться не должна. Якорь — для «перейти»,
+ * снимок — для чтения; расходятся они редко и не смертельно.
+ */
+const MARK_COLORS = [
+  { id: 'yellow', name: 'Жёлтый' },
+  { id: 'green', name: 'Зелёный' },
+  { id: 'blue', name: 'Голубой' },
+  { id: 'pink', name: 'Розовый' },
+  { id: 'red', name: 'Красный' },
+];
+const DEFAULT_COLOR = 'yellow';
 
 /* варианты шрифтов по направлению письма; значение option = font-family стек */
 const FONT_CHOICES = {
@@ -59,6 +90,43 @@ function saveSettings() {
 }
 
 const settings = loadSettings();
+
+/* Миграция старых ключей в `marks`. Выполняется один раз и НЕ трогает исходные
+   массивы, пока не сложит всё новое: если что-то пойдёт не так, прежние закладки
+   и выделения останутся в localStorage нетронутыми и их можно будет разобрать
+   руками. Прошлые данные пользователя дороже чистоты хранилища. */
+function migrateMarks() {
+  const oldHl = settings.highlights || {};
+  const oldBm = settings.bookmarks || {};
+  const bookIds = new Set([...Object.keys(oldHl), ...Object.keys(oldBm)]);
+  if (!bookIds.size) return;
+  let moved = 0;
+  for (const id of bookIds) {
+    const list = settings.marks[id] || (settings.marks[id] = []);
+    const known = new Set(list.map(m => m.ts + ':' + m.sector));
+    for (const h of oldHl[id] || []) {
+      if (known.has(h.ts + ':' + h.id)) continue;
+      list.push({
+        id: newMarkId(), chapter: h.chapter, sector: h.id, lang: h.lang,
+        start: h.start, end: h.end, color: DEFAULT_COLOR, note: '', tags: [],
+        text: '', page: null, ts: h.ts || Date.now(), edited: 0,
+      });
+      moved++;
+    }
+    for (const b of oldBm[id] || []) {
+      if (known.has(b.ts + ':' + b.id)) continue;
+      list.push({
+        id: newMarkId(), chapter: b.chapter, sector: b.id, lang: null,
+        start: null, end: null, color: null, note: b.note || '', tags: [],
+        text: '', page: b.page ?? null, ts: b.ts || Date.now(), edited: 0,
+      });
+      moved++;
+    }
+  }
+  settings.highlights = {};
+  settings.bookmarks = {};
+  if (moved) saveSettings();
+}
 
 /* позиция чтения по книге (со старого формата, где было просто число главы) */
 function getLast(id) {
@@ -266,8 +334,7 @@ function renderChapter() {
     stream.appendChild(note);
   }
   applyVisibility();
-  markBookmarks();
-  applyHighlights();
+  applyMarks();
 }
 
 /* ===== видимость языков: both → <orig> → <trans> → quiz:<orig> → quiz:<trans> ===== */
@@ -402,7 +469,9 @@ stream.addEventListener('click', e => {
   const figImg = e.target.closest('.fig img');
   if (figImg) { showImage(figImg.currentSrc || figImg.src); return; }
   const hl = e.target.closest('mark.hl');
-  if (hl && window.getSelection().isCollapsed) { removeHighlight(hl.dataset.ts); return; }
+  // тап по выделению открывает его правку (цвет, заметка, теги, сборники), а не удаляет:
+  // случайно снести мысль одним касанием — слишком дорого
+  if (hl && window.getSelection().isCollapsed) { openMarkEditor(hl.dataset.mark); return; }
   // одноязычный режим: тап по паре раскрывает/прячет второй язык (не мешаем выделению)
   if (settings.visibility !== 'both' && window.getSelection().isCollapsed) {
     const pairEl = e.target.closest('.pair');
@@ -570,41 +639,159 @@ function markTocCurrent() {
   });
 }
 
-/* ===== закладки на сектор (с заметкой) ===== */
-function getBookmarks(id = bookId) {
-  return settings.bookmarks[id] || []; // чистый геттер — не плодим пустые записи в localStorage
+/* ===== пометки: доступ к данным ===== */
+function newMarkId() {
+  return 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
-function findBookmark(secId) {
-  return getBookmarks().find(b => b.id === secId);
+function getMarks(id = bookId) {
+  return settings.marks[id] || [];  // чистый геттер — не плодим пустые записи в localStorage
+}
+function markList(id = bookId) {
+  return settings.marks[id] || (settings.marks[id] = []);
+}
+function findMark(mid, id = bookId) {
+  return getMarks(id).find(m => m.id === mid);
+}
+const isClip = m => m.start !== null && m.start !== undefined;   // вырезка = пометка с фрагментом
+
+/* Все пометки всех книг одним списком — основа раздела «Вырезки». Записи не копируются:
+   возвращаются ссылки на те же объекты, чтобы правка из любого места меняла оригинал. */
+function allMarks() {
+  const out = [];
+  for (const [id, list] of Object.entries(settings.marks || {})) {
+    for (const m of list) out.push({ book: id, mark: m });
+  }
+  return out;
+}
+function bookTitleById(id) {
+  const e = library.find(b => b.id === id);
+  if (!e) return id;
+  const t = e.title || {};
+  return t.ru || Object.values(t)[0] || id;
+}
+// все теги, уже применённые хоть где-то — для подсказок и фильтра
+function allTags() {
+  const s = new Set();
+  for (const { mark } of allMarks()) for (const t of mark.tags || []) s.add(t);
+  for (const c of settings.collections || []) for (const t of c.tags || []) s.add(t);
+  return [...s].sort((a, b) => a.localeCompare(b, 'ru'));
 }
 
+/* ===== пометки: нанесение на текущую главу ===== */
+function applyMarks() {
+  // закладки на сектор — метка на самой паре
+  const secIds = new Set(getMarks().filter(m => !isClip(m) && m.chapter === chapterIndex).map(m => m.sector));
+  stream.querySelectorAll('.pair').forEach(el => {
+    el.classList.toggle('bookmarked', secIds.has(el.dataset.id));
+  });
+  // вырезки — подкраска фрагмента внутри члена пары
+  for (const m of getMarks()) {
+    if (!isClip(m) || m.chapter !== chapterIndex) continue;
+    const pairEl = pairById(m.sector);
+    const member = pairEl && pairEl.querySelector(`.member.lang-${m.lang}`);
+    if (!member) continue;
+    const cls = 'hl hl-' + (m.color || DEFAULT_COLOR) + (m.note ? ' has-note' : '');
+    highlightRange(member, m.start, m.end, cls, { mark: m.id });
+  }
+}
+
+// перерисовать подкраску целиком: проще и надёжнее точечной вставки поверх пересечений
+function repaintMarks() {
+  stream.querySelectorAll('mark.hl').forEach(unwrap);
+  applyMarks();
+}
+
+/* ===== пометки: создание и правка ===== */
+// смещения выделения относительно textContent члена (как у поиска)
+function selectionOffsets(member, range) {
+  if (!member.contains(range.startContainer) || !member.contains(range.endContainer)) return null;
+  const pre = range.cloneRange();
+  pre.selectNodeContents(member);
+  pre.setEnd(range.startContainer, range.startOffset);
+  const start = pre.toString().length;
+  const end = start + range.toString().length;
+  return end > start ? { start, end } : null;
+}
+
+/* Выделенный фрагмент → новая пометка. Возвращает её или null.
+   openNote — сразу открыть редактор заметки (путь «выделил и записал мысль»). */
+function addRangeMark(color = DEFAULT_COLOR, openNote = false) {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || !sel.rangeCount) return null;
+  const range = sel.getRangeAt(0);
+  const startEl = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement;
+  const member = startEl.closest('.member');
+  const pairEl = member && member.closest('.pair');
+  if (!member || !pairEl) return null;
+  const off = selectionOffsets(member, range);
+  if (!off) return null;
+  const mark = {
+    id: newMarkId(),
+    chapter: chapterIndex,
+    sector: pairEl.dataset.id,
+    lang: member.getAttribute('lang'),
+    start: off.start,
+    end: off.end,
+    color,
+    note: '',
+    tags: [],
+    text: sel.toString().replace(/\s+/g, ' ').trim(),   // снимок — см. шапку «ПОМЕТКИ»
+    page: pairEl.dataset.page ? Number(pairEl.dataset.page) : currentPage(),
+    ts: Date.now(),
+    edited: 0,
+  };
+  markList().push(mark);
+  saveSettings();
+  sel.removeAllRanges();
+  hideSelToolbar();
+  repaintMarks();
+  buildMarkPanel();
+  if (openNote) openMarkEditor(mark.id, { focusNote: true });
+  else toast('Выделено');
+  return mark;
+}
+
+// закладка на текущем месте — пометка без фрагмента
 function toggleActiveBookmark() {
   if (!book || !activeEl) return;
   const secId = activeEl.dataset.id;
-  const list = settings.bookmarks[bookId] || (settings.bookmarks[bookId] = []);
-  const i = list.findIndex(b => b.id === secId);
+  const list = markList();
+  const i = list.findIndex(m => !isClip(m) && m.sector === secId && m.chapter === chapterIndex);
   if (i >= 0) list.splice(i, 1);
-  else list.push({ id: secId, chapter: chapterIndex, page: currentPage(), note: '', ts: Date.now() });
-  saveSettings();
-  markBookmarks();
-  updateBookmarkBtn();
-  buildBookmarks();
-  toast(i >= 0 ? 'Закладка снята' : 'Закладка добавлена');
-}
-
-// метка на абзацах текущей главы
-function markBookmarks() {
-  const ids = new Set(getBookmarks().filter(b => b.chapter === chapterIndex).map(b => b.id));
-  stream.querySelectorAll('.pair').forEach(el => {
-    el.classList.toggle('bookmarked', ids.has(el.dataset.id));
+  else list.push({
+    id: newMarkId(), chapter: chapterIndex, sector: secId, lang: null,
+    start: null, end: null, color: null, note: '', tags: [],
+    text: (activeEl.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 300),
+    page: currentPage(), ts: Date.now(), edited: 0,
   });
+  saveSettings();
+  applyMarks();
+  updateBookmarkBtn();
+  buildMarkPanel();
+  toast(i >= 0 ? 'Закладка снята' : 'Закладка добавлена');
 }
 
 function updateBookmarkBtn() {
   const btn = $('#btn-bookmark');
-  const on = !!(book && activeEl && findBookmark(activeEl.dataset.id));
+  const on = !!(book && activeEl && getMarks().some(m => !isClip(m) && m.sector === activeEl.dataset.id && m.chapter === chapterIndex));
   btn.classList.toggle('active-mark', on);
   btn.title = on ? 'Убрать закладку' : 'Закладка на текущем месте';
+}
+
+function removeMark(mid) {
+  const list = markList();
+  const i = list.findIndex(m => m.id === mid);
+  if (i < 0) return;
+  list.splice(i, 1);
+  // подчистить ссылки в сборниках, иначе там останутся мёртвые записи
+  for (const c of settings.collections || []) {
+    c.items = (c.items || []).filter(it => !(it.book === bookId && it.mark === mid));
+  }
+  saveSettings();
+  repaintMarks();
+  applyMarks();
+  updateBookmarkBtn();
+  buildMarkPanel();
 }
 
 function gotoSector(secId, chapter) {
@@ -620,130 +807,233 @@ function shareSector(secId) {
   else toast(url);
 }
 
-// список закладок в оглавлении
-function buildBookmarks() {
+/* ===== редактор пометки ===== */
+let editingMark = null;   // { book, id }
+
+function openMarkEditor(mid, { focusNote = false, bookOf = bookId } = {}) {
+  const m = findMark(mid, bookOf);
+  if (!m) return;
+  editingMark = { book: bookOf, id: mid };
+  const box = $('#mark-editor');
+
+  $('#mark-text').textContent = m.text || '(фрагмент не сохранён)';
+  $('#mark-text').hidden = !m.text;
+  $('#mark-where').textContent = markPlace(bookOf, m);
+  $('#mark-note').value = m.note || '';
+  $('#mark-tags').value = (m.tags || []).join(', ');
+
+  // палитра: у закладки цвета нет — красить нечего
+  const pal = $('#mark-colors');
+  pal.hidden = !isClip(m);
+  pal.innerHTML = '';
+  for (const c of MARK_COLORS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'swatch sw-' + c.id + (m.color === c.id ? ' on' : '');
+    b.title = c.name;
+    b.addEventListener('click', () => {
+      m.color = c.id; m.edited = Date.now();
+      saveSettings(); repaintMarks(); openMarkEditor(mid, { bookOf });
+    });
+    pal.appendChild(b);
+  }
+
+  renderTagSuggest();
+  renderCollectionPicker();
+  openOverlay(box);
+  if (focusNote) setTimeout(() => $('#mark-note').focus(), 60);
+}
+
+/* «Книга · Глава · стр. N» — источник вырезки, читаемый и вне книги.
+   withBook: в списке вырезок название книги нужно ВСЕГДА (там вперемешку разные книги),
+   а в панели внутри книги оно только шумит — и так понятно, где находишься. */
+function markPlace(bid, m, withBook = false) {
+  const parts = [];
+  if (withBook || bid !== bookId) parts.push(bookTitleById(bid));
+  if (bid === bookId && book && book.chapters[m.chapter]) parts.push(pickTitle(book.chapters[m.chapter].title));
+  else parts.push('гл. ' + (m.chapter + 1));
+  if (m.page != null) parts.push('стр. ' + m.page);
+  return parts.join(' · ');
+}
+
+function saveMarkEditor() {
+  if (!editingMark) return;
+  const m = findMark(editingMark.id, editingMark.book);
+  if (!m) return;
+  m.note = $('#mark-note').value.trim();
+  m.tags = $('#mark-tags').value.split(',').map(s => s.trim()).filter(Boolean);
+  m.edited = Date.now();
+  saveSettings();
+  if (editingMark.book === bookId) repaintMarks();
+  buildMarkPanel();
+  renderClips();
+  $('#mark-editor').hidden = true;
+  consumeOverlayMark();
+  toast('Сохранено');
+}
+
+// подсказки уже использованных тегов — чтобы теги не плодились опечатками
+function renderTagSuggest() {
+  const box = $('#mark-tag-suggest');
+  box.innerHTML = '';
+  const used = $('#mark-tags').value.split(',').map(s => s.trim()).filter(Boolean);
+  const rest = allTags().filter(t => !used.includes(t)).slice(0, 12);
+  box.hidden = !rest.length;
+  for (const t of rest) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip tag-chip';
+    b.textContent = t;
+    b.addEventListener('click', () => {
+      const cur = $('#mark-tags').value.split(',').map(s => s.trim()).filter(Boolean);
+      cur.push(t);
+      $('#mark-tags').value = cur.join(', ');
+      renderTagSuggest();
+    });
+    box.appendChild(b);
+  }
+}
+
+// в какие сборники входит эта пометка
+function renderCollectionPicker() {
+  const box = $('#mark-colls');
+  box.innerHTML = '';
+  if (!editingMark) return;
+  for (const c of settings.collections || []) {
+    const inIt = (c.items || []).some(it => it.book === editingMark.book && it.mark === editingMark.id);
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip' + (inIt ? ' on' : '');
+    b.textContent = (inIt ? '✓ ' : '+ ') + c.name;
+    b.addEventListener('click', () => {
+      toggleInCollection(c.id, editingMark.book, editingMark.id);
+      renderCollectionPicker();
+    });
+    box.appendChild(b);
+  }
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'chip chip-new';
+  add.textContent = '+ новый сборник';
+  add.addEventListener('click', () => {
+    const name = prompt('Название сборника:');
+    if (!name || !name.trim()) return;
+    const c = createCollection(name.trim());
+    toggleInCollection(c.id, editingMark.book, editingMark.id);
+    renderCollectionPicker();
+  });
+  box.appendChild(add);
+}
+
+/* ===== сборники ===== */
+function createCollection(name) {
+  const c = { id: 'c' + Date.now().toString(36), name, note: '', tags: [], items: [], ts: Date.now() };
+  (settings.collections || (settings.collections = [])).push(c);
+  saveSettings();
+  return c;
+}
+function toggleInCollection(cid, bid, mid) {
+  const c = (settings.collections || []).find(x => x.id === cid);
+  if (!c) return;
+  c.items = c.items || [];
+  const i = c.items.findIndex(it => it.book === bid && it.mark === mid);
+  if (i >= 0) c.items.splice(i, 1);
+  else c.items.push({ book: bid, mark: mid });
+  saveSettings();
+  renderClips();
+}
+
+/* ===== панель пометок в оглавлении ===== */
+function buildMarkPanel() {
   const section = $('#bm-section');
   const ul = $('#bm-list');
+  if (!section || !ul) return;
   ul.innerHTML = '';
-  const list = getBookmarks().slice().sort((a, b) => a.chapter - b.chapter || a.id.localeCompare(b.id));
+  const list = getMarks().slice().sort((a, b) => a.chapter - b.chapter || String(a.sector).localeCompare(String(b.sector)));
   section.hidden = list.length === 0;
-  for (const b of list) {
-    const li = document.createElement('li');
-    li.className = 'bm-item';
+  $('#bm-count').textContent = list.length ? String(list.length) : '';
+  for (const m of list) ul.appendChild(markRow(m, bookId, { compact: true }));
+}
 
-    const go = document.createElement('button');
-    go.type = 'button';
-    go.className = 'bm-go';
-    const meta = document.createElement('span');
-    meta.className = 'bm-meta';
-    const chTitle = book.chapters[b.chapter] ? pickTitle(book.chapters[b.chapter].title) : `гл. ${b.chapter + 1}`;
-    meta.textContent = chTitle + (b.page != null ? ` · стр. ${b.page}` : '');
-    go.appendChild(meta);
-    if (b.note) {
-      const note = document.createElement('span');
-      note.className = 'bm-note';
-      note.textContent = b.note;
-      go.appendChild(note);
-    }
-    go.addEventListener('click', () => gotoSector(b.id, b.chapter));
-    li.appendChild(go);
+/* Одна строка пометки. Используется и в панели книги, и в списке вырезок —
+   разметка одна, чтобы вид пометки не разъезжался между двумя местами. */
+function markRow(m, bid, { compact = false } = {}) {
+  const li = document.createElement('li');
+  li.className = 'bm-item mark-item' + (isClip(m) ? ' is-clip c-' + (m.color || DEFAULT_COLOR) : ' is-bm');
 
-    const actions = document.createElement('span');
-    actions.className = 'bm-actions';
-    const edit = document.createElement('button');
-    edit.type = 'button';
-    edit.title = 'Заметка';
-    edit.textContent = '✎';
-    edit.addEventListener('click', () => {
-      const text = prompt('Заметка к закладке:', b.note || '');
-      if (text === null) return;
-      b.note = text.trim();
-      saveSettings();
-      buildBookmarks();
-    });
-    const share = document.createElement('button');
-    share.type = 'button';
-    share.title = 'Скопировать ссылку';
-    share.textContent = '↗';
-    share.addEventListener('click', () => shareSector(b.id));
-    const del = document.createElement('button');
-    del.type = 'button';
-    del.title = 'Удалить';
-    del.textContent = '🗑';
-    del.addEventListener('click', () => {
-      const arr = getBookmarks();
-      const i = arr.findIndex(x => x.id === b.id);
-      if (i >= 0) arr.splice(i, 1);
-      saveSettings();
-      buildBookmarks();
-      markBookmarks();
-      updateBookmarkBtn();
-    });
-    actions.append(edit, share, del);
-    li.appendChild(actions);
-    ul.appendChild(li);
+  const go = document.createElement('button');
+  go.type = 'button';
+  go.className = 'bm-go';
+
+  const meta = document.createElement('span');
+  meta.className = 'bm-meta';
+  meta.textContent = markPlace(bid, m, !compact);
+  go.appendChild(meta);
+
+  if (m.text) {
+    const quote = document.createElement('span');
+    quote.className = 'mark-quote';
+    quote.textContent = compact ? m.text.slice(0, 160) : m.text;
+    go.appendChild(quote);
   }
+  if (m.note) {
+    const note = document.createElement('span');
+    note.className = 'bm-note';
+    note.textContent = m.note;
+    go.appendChild(note);
+  }
+  if ((m.tags || []).length) {
+    const tags = document.createElement('span');
+    tags.className = 'mark-tags';
+    for (const t of m.tags) {
+      const s = document.createElement('span');
+      s.className = 'mark-tag';
+      s.textContent = t;
+      tags.appendChild(s);
+    }
+    go.appendChild(tags);
+  }
+  go.addEventListener('click', () => {
+    if (bid === bookId) gotoSector(m.sector, m.chapter);
+    else openBook(library.find(b => b.id === bid), { chapter: m.chapter, sector: m.sector });
+  });
+  li.appendChild(go);
+
+  const actions = document.createElement('span');
+  actions.className = 'bm-actions';
+  const edit = document.createElement('button');
+  edit.type = 'button';
+  edit.title = 'Заметка, цвет, теги, сборники';
+  edit.textContent = '✎';
+  edit.addEventListener('click', () => openMarkEditor(m.id, { bookOf: bid }));
+  const share = document.createElement('button');
+  share.type = 'button';
+  share.title = 'Скопировать ссылку';
+  share.textContent = '↗';
+  share.addEventListener('click', () => shareSector(m.sector));
+  const del = document.createElement('button');
+  del.type = 'button';
+  del.title = 'Удалить';
+  del.textContent = '🗑';
+  del.addEventListener('click', () => {
+    if (bid === bookId) removeMark(m.id);
+    else {
+      const l = settings.marks[bid] || [];
+      const i = l.findIndex(x => x.id === m.id);
+      if (i >= 0) l.splice(i, 1);
+      saveSettings();
+    }
+    renderClips();
+    buildMarkPanel();
+  });
+  actions.append(edit, share, del);
+  li.appendChild(actions);
+  return li;
 }
 
 $('#btn-bookmark').addEventListener('click', toggleActiveBookmark);
 
-/* ===== текстовые выделения ===== */
-function getHighlights(id = bookId) {
-  return settings.highlights[id] || [];
-}
-
-// нанести сохранённые выделения текущей главы поверх отрендеренных пар
-function applyHighlights() {
-  for (const h of getHighlights()) {
-    if (h.chapter !== chapterIndex) continue;
-    const pairEl = pairById(h.id);
-    const member = pairEl && pairEl.querySelector(`.member.lang-${h.lang}`);
-    if (member) highlightRange(member, h.start, h.end, 'hl', { ts: String(h.ts) });
-  }
-}
-
-// смещения выделения относительно textContent члена (как у поиска)
-function selectionOffsets(member, range) {
-  if (!member.contains(range.startContainer) || !member.contains(range.endContainer)) return null;
-  const pre = range.cloneRange();
-  pre.selectNodeContents(member);
-  pre.setEnd(range.startContainer, range.startOffset);
-  const start = pre.toString().length;
-  const end = start + range.toString().length;
-  return end > start ? { start, end } : null;
-}
-
-function addHighlight() {
-  const sel = window.getSelection();
-  if (!sel || sel.isCollapsed || !sel.rangeCount) return;
-  const range = sel.getRangeAt(0);
-  const member = (range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement)
-    .closest('.member');
-  const pairEl = member && member.closest('.pair');
-  if (!member || !pairEl) return;
-  const off = selectionOffsets(member, range);
-  if (!off) return;
-  const lang = member.getAttribute('lang');
-  const list = settings.highlights[bookId] || (settings.highlights[bookId] = []);
-  list.push({ chapter: chapterIndex, id: pairEl.dataset.id, lang, start: off.start, end: off.end, ts: Date.now() });
-  saveSettings();
-  sel.removeAllRanges();
-  hideSelToolbar();
-  // перерисуем выделения главы (проще, чем точечно вставлять поверх возможных пересечений)
-  stream.querySelectorAll('mark.hl').forEach(unwrap);
-  applyHighlights();
-}
-
-function removeHighlight(ts) {
-  const list = settings.highlights[bookId];
-  if (!list) return;
-  const i = list.findIndex(h => String(h.ts) === String(ts));
-  if (i >= 0) { list.splice(i, 1); saveSettings(); }
-  stream.querySelectorAll('mark.hl').forEach(unwrap);
-  applyHighlights();
-}
-
-/* плавающая кнопка над выделением */
+/* ===== плавающая панель над выделением ===== */
 function showSelToolbar(range) {
   const bar = $('#sel-toolbar');
   $('#sel-err').hidden = !(book && book.feedbackEmail);
@@ -766,8 +1056,277 @@ document.addEventListener('selectionchange', () => {
   else hideSelToolbar();
 });
 
-$('#sel-hl').addEventListener('mousedown', e => { e.preventDefault(); addHighlight(); });
-$('#sel-hl').addEventListener('touchstart', e => { e.preventDefault(); addHighlight(); }, { passive: false });
+/* Цветные кнопки панели выделения. mousedown/touchstart с preventDefault — иначе
+   касание снимет выделение раньше, чем мы успеем его прочитать. */
+function bindSelAction(el, fn) {
+  el.addEventListener('mousedown', e => { e.preventDefault(); fn(); });
+  el.addEventListener('touchstart', e => { e.preventDefault(); fn(); }, { passive: false });
+}
+(function buildSelPalette() {
+  const pal = $('#sel-colors');
+  for (const c of MARK_COLORS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'swatch sw-' + c.id;
+    b.title = 'Выделить: ' + c.name.toLowerCase();
+    bindSelAction(b, () => addRangeMark(c.id, false));
+    pal.appendChild(b);
+  }
+})();
+bindSelAction($('#sel-note'), () => addRangeMark(DEFAULT_COLOR, true));
+
+/* ===== ВЫРЕЗКИ: сквозной свод пометок по всем книгам =====
+ * Полка отвечает на вопрос «что почитать», вырезки — на вопрос «что я об этом думал».
+ * Поэтому это отдельный раздел, а не вкладка внутри книги: мысль по теме почти всегда
+ * собирается из разных книг, и держать её запертой в одной — значит не дать её собрать.
+ * Ничего своего этот раздел не хранит: он рисует те же объекты пометок, что и книга.
+ */
+const clipsUI = { tab: 'all', book: '', tag: '', color: '', q: '', coll: null };
+
+function openClips() {
+  $('#settings').hidden = true;
+  clipsUI.coll = null;
+  clipsUI.tab = 'all';
+  // показать ПЕРЕД отрисовкой: renderClips ничего не делает, пока панель скрыта
+  // (эта же проверка бережёт от лишней работы при правке пометки из книги)
+  openOverlay($('#clips'));
+  renderClips();
+}
+
+function clipMatches(bid, m) {
+  if (clipsUI.book && bid !== clipsUI.book) return false;
+  if (clipsUI.tag && !(m.tags || []).includes(clipsUI.tag)) return false;
+  if (clipsUI.color && (m.color || '') !== clipsUI.color) return false;
+  if (clipsUI.q) {
+    const q = clipsUI.q.toLowerCase();
+    if (!((m.text || '') + ' ' + (m.note || '')).toLowerCase().includes(q)) return false;
+  }
+  return true;
+}
+
+function renderClips() {
+  const box = $('#clips-body');
+  if (!box || $('#clips').hidden) return;
+  box.innerHTML = '';
+  $('#clips-tab-all').classList.toggle('on', clipsUI.tab === 'all');
+  $('#clips-tab-colls').classList.toggle('on', clipsUI.tab === 'colls');
+  $('#clips-filters').hidden = clipsUI.tab !== 'all';
+
+  if (clipsUI.tab === 'colls') return renderCollectionsList(box);
+  renderClipFilters();
+
+  const rows = allMarks()
+    .filter(x => clipMatches(x.book, x.mark))
+    .sort((a, b) => (b.mark.ts || 0) - (a.mark.ts || 0));
+
+  $('#clips-count').textContent = rows.length
+    ? `${rows.length} ${plural(rows.length, 'пометка', 'пометки', 'пометок')}`
+    : '';
+
+  if (!rows.length) {
+    const p = document.createElement('p');
+    p.className = 'clips-empty';
+    p.textContent = allMarks().length
+      ? 'Под фильтр ничего не попало.'
+      : 'Пока пусто. Выделите фрагмент в книге — и он появится здесь.';
+    box.appendChild(p);
+    return;
+  }
+  const ul = document.createElement('ul');
+  ul.className = 'clip-list';
+  for (const { book: bid, mark } of rows) ul.appendChild(markRow(mark, bid));
+  box.appendChild(ul);
+}
+
+// строка фильтров: книга, тег, цвет. Показываем только реально встречающиеся значения
+function renderClipFilters() {
+  const box = $('#clips-filters');
+  box.innerHTML = '';
+
+  const bookIds = [...new Set(allMarks().map(x => x.book))];
+  box.appendChild(selectFilter('Книга', bookIds.map(id => [id, bookTitleById(id)]), clipsUI.book, v => { clipsUI.book = v; renderClips(); }));
+  const tags = allTags();
+  if (tags.length) box.appendChild(selectFilter('Тег', tags.map(t => [t, t]), clipsUI.tag, v => { clipsUI.tag = v; renderClips(); }));
+  const colors = [...new Set(allMarks().map(x => x.mark.color).filter(Boolean))];
+  if (colors.length) {
+    const names = new Map(MARK_COLORS.map(c => [c.id, c.name]));
+    box.appendChild(selectFilter('Цвет', colors.map(c => [c, names.get(c) || c]), clipsUI.color, v => { clipsUI.color = v; renderClips(); }));
+  }
+  if (clipsUI.book || clipsUI.tag || clipsUI.color || clipsUI.q) {
+    const reset = document.createElement('button');
+    reset.type = 'button';
+    reset.className = 'chip';
+    reset.textContent = '✕ сбросить';
+    reset.addEventListener('click', () => {
+      clipsUI.book = clipsUI.tag = clipsUI.color = clipsUI.q = '';
+      $('#clips-q').value = '';
+      renderClips();
+    });
+    box.appendChild(reset);
+  }
+}
+
+function selectFilter(label, pairs, value, onChange) {
+  const wrap = document.createElement('label');
+  wrap.className = 'clip-filter';
+  wrap.append(label);
+  const sel = document.createElement('select');
+  const any = document.createElement('option');
+  any.value = ''; any.textContent = 'все';
+  sel.appendChild(any);
+  for (const [v, t] of pairs) {
+    const o = document.createElement('option');
+    o.value = v; o.textContent = t;
+    if (v === value) o.selected = true;
+    sel.appendChild(o);
+  }
+  sel.addEventListener('change', () => onChange(sel.value));
+  wrap.appendChild(sel);
+  return wrap;
+}
+
+/* ===== сборники: список и просмотр ===== */
+function renderCollectionsList(box) {
+  const colls = settings.collections || [];
+  $('#clips-count').textContent = colls.length
+    ? `${colls.length} ${plural(colls.length, 'сборник', 'сборника', 'сборников')}`
+    : '';
+
+  if (clipsUI.coll) {
+    const c = colls.find(x => x.id === clipsUI.coll);
+    if (!c) { clipsUI.coll = null; return renderCollectionsList(box); }
+    return renderOneCollection(box, c);
+  }
+
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'primary coll-new';
+  add.textContent = '+ Новый сборник';
+  add.addEventListener('click', () => {
+    const name = prompt('Название сборника:');
+    if (name && name.trim()) { createCollection(name.trim()); renderClips(); }
+  });
+  box.appendChild(add);
+
+  if (!colls.length) {
+    const p = document.createElement('p');
+    p.className = 'clips-empty';
+    p.textContent = 'Сборник — это подборка вырезок по теме, собранная из разных книг.';
+    box.appendChild(p);
+    return;
+  }
+  const ul = document.createElement('ul');
+  ul.className = 'coll-list';
+  for (const c of colls) {
+    const li = document.createElement('li');
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'coll-open';
+    const n = document.createElement('b');
+    n.textContent = c.name;
+    const cnt = document.createElement('span');
+    cnt.className = 'coll-count';
+    cnt.textContent = `${(c.items || []).length}`;
+    b.append(n, cnt);
+    b.addEventListener('click', () => { clipsUI.coll = c.id; renderClips(); });
+    li.appendChild(b);
+    ul.appendChild(li);
+  }
+  box.appendChild(ul);
+}
+
+function renderOneCollection(box, c) {
+  const head = document.createElement('div');
+  head.className = 'coll-head';
+  const back = document.createElement('button');
+  back.type = 'button';
+  back.className = 'chip';
+  back.textContent = '‹ все сборники';
+  back.addEventListener('click', () => { clipsUI.coll = null; renderClips(); });
+  const title = document.createElement('h3');
+  title.textContent = c.name;
+  head.append(back, title);
+
+  const tools = document.createElement('div');
+  tools.className = 'coll-tools';
+  const rename = document.createElement('button');
+  rename.type = 'button'; rename.className = 'chip'; rename.textContent = '✎ переименовать';
+  rename.addEventListener('click', () => {
+    const n = prompt('Название сборника:', c.name);
+    if (n && n.trim()) { c.name = n.trim(); saveSettings(); renderClips(); }
+  });
+  const copy = document.createElement('button');
+  copy.type = 'button'; copy.className = 'chip'; copy.textContent = '⧉ скопировать как текст';
+  copy.addEventListener('click', () => copyCollection(c));
+  const del = document.createElement('button');
+  del.type = 'button'; del.className = 'chip'; del.textContent = '🗑 удалить сборник';
+  del.addEventListener('click', () => {
+    if (!confirm(`Удалить сборник «${c.name}»? Сами вырезки останутся.`)) return;
+    settings.collections = (settings.collections || []).filter(x => x.id !== c.id);
+    saveSettings();
+    clipsUI.coll = null;
+    renderClips();
+  });
+  tools.append(rename, copy, del);
+  head.appendChild(tools);
+  box.appendChild(head);
+
+  const items = (c.items || [])
+    .map(it => ({ book: it.book, mark: findMark(it.mark, it.book) }))
+    .filter(x => x.mark);   // пометку могли удалить — мёртвые ссылки просто не рисуем
+  if (!items.length) {
+    const p = document.createElement('p');
+    p.className = 'clips-empty';
+    p.textContent = 'Пусто. Откройте вырезку (✎) и добавьте её в этот сборник.';
+    box.appendChild(p);
+    return;
+  }
+  const ul = document.createElement('ul');
+  ul.className = 'clip-list';
+  for (const { book: bid, mark } of items) ul.appendChild(markRow(mark, bid));
+  box.appendChild(ul);
+}
+
+/* Сборник → markdown в буфер обмена: подборка нужна не только внутри библиотеки,
+   а и в заметках, в статье, в разговоре. Формат тот же, что понимает Вычитка. */
+function copyCollection(c) {
+  const lines = ['# ' + c.name, ''];
+  for (const it of c.items || []) {
+    const m = findMark(it.mark, it.book);
+    if (!m) continue;
+    lines.push('> ' + (m.text || '(фрагмент не сохранён)'));
+    lines.push('');
+    lines.push('— *' + bookTitleById(it.book) + '*' + (m.page != null ? ', стр. ' + m.page : ''));
+    if (m.note) lines.push('', m.note);
+    if ((m.tags || []).length) lines.push('', m.tags.map(t => '#' + t.replace(/\s+/g, '-')).join(' '));
+    lines.push('', '---', '');
+  }
+  const text = lines.join('\n');
+  if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => toast('Сборник скопирован'), () => toast('Не удалось скопировать'));
+  else toast('Буфер обмена недоступен');
+}
+
+$('#clips-tab-all').addEventListener('click', () => { clipsUI.tab = 'all'; clipsUI.coll = null; renderClips(); });
+$('#clips-tab-colls').addEventListener('click', () => { clipsUI.tab = 'colls'; renderClips(); });
+$('#clips-q').addEventListener('input', e => { clipsUI.q = e.target.value.trim(); renderClips(); });
+$('#btn-clips').addEventListener('click', openClips);
+$('#mark-save').addEventListener('click', saveMarkEditor);
+$('#mark-delete').addEventListener('click', () => {
+  if (!editingMark) return;
+  const { book: bid, id } = editingMark;
+  if (bid === bookId) removeMark(id);
+  else {
+    const l = settings.marks[bid] || [];
+    const i = l.findIndex(x => x.id === id);
+    if (i >= 0) l.splice(i, 1);
+    saveSettings();
+  }
+  $('#mark-editor').hidden = true;
+  consumeOverlayMark();
+  renderClips();
+  buildMarkPanel();
+});
+$('#mark-tags').addEventListener('input', renderTagSuggest);
 
 /* «Сообщить об ошибке»: выделенный фрагмент → письмо с местом (глава/сектор/страница/язык).
    Адрес берётся из book.json (feedbackEmail) — у книг без адреса кнопка скрыта. */
@@ -1118,7 +1677,7 @@ function importSettings(file) {
       ensureFontDefaults();
       applyFonts();
       setupFontSettings();
-      buildBookmarks();
+      buildMarkPanel();
       renderChapter();
       updateActive();
     }
@@ -1146,9 +1705,6 @@ function readingStreak() {
   while (set.has(localDay(d))) { s++; d.setDate(d.getDate() - 1); }
   return s;
 }
-function sumOver(map) {
-  return Object.values(map || {}).reduce((n, arr) => n + (Array.isArray(arr) ? arr.length : 0), 0);
-}
 function plural(n, one, few, many) {
   const m10 = n % 10, m100 = n % 100;
   if (m10 === 1 && m100 !== 11) return one;
@@ -1161,8 +1717,10 @@ function buildStats() {
     ['Дней подряд', `${readingStreak()}`],
     ['Дней с чтением', `${(settings.readDays || []).length}`],
     ['Книг начато', `${library.filter(e => getLast(e.id)).length} из ${library.length}`],
-    ['Закладок', `${sumOver(settings.bookmarks)}`],
-    ['Выделений', `${sumOver(settings.highlights)}`],
+    ['Закладок', `${allMarks().filter(x => !isClip(x.mark)).length}`],
+    ['Вырезок', `${allMarks().filter(x => isClip(x.mark)).length}`],
+    ['С заметкой', `${allMarks().filter(x => x.mark.note).length}`],
+    ['Сборников', `${(settings.collections || []).length}`],
   ];
   const box = $('#stats-body');
   box.innerHTML = '';
@@ -2062,7 +2620,7 @@ async function openBook(entry, opts = {}) {
   setupFontSettings();
   document.title = pickTitle(book.title);
   buildToc();
-  buildBookmarks();
+  buildMarkPanel();
   // переход из поиска по библиотеке: открыть нужную главу и подсветить попадание
   if (opts.hit) { pendingHit = opts.hit; await loadChapter(opts.hit.ci, opts.hit.id); return; }
   // deep-link ?s=<sector> — найти главу с этим сектором; иначе вернуться к позиции
@@ -2120,11 +2678,26 @@ $('#filter-reset').addEventListener('click', () => {
 });
 
 /* ===== аккаунт и каталог за бэкендом (BACKEND.md, фаза 1) =====
-   Полка = статический реестр ∪ непубличные книги, доступные вошедшему. Аноним видит
-   ровно то же, что и раньше: бэкенд не отвечает или не настроен — просто нет второго
-   слагаемого, публичная читалка работает как работала. */
+   Полка = статический реестр ∪ локальные непубличные ∪ непубличные из бэкенда. Аноним
+   без локальной папки видит ровно то же, что и раньше: слагаемые просто пустые, и
+   публичная библиотека работает как работала. */
 let staticLibrary = [];             // то, что пришло из books/index.json
 const backendReady = () => Boolean(window.SB && SB.configured());
+
+/* Локальные непубличные книги: папка books-private/ в проекте, целиком под .gitignore.
+   Файлы обычные, читаются прямым fetch — значит работают офлайн и попадают в кеш SW,
+   в отличие от бакетных (те идут мимо кеша, см. isBackend в sw.js).
+   На GitHub Pages этой папки нет: fetch отвечает 404, и слагаемое просто пустое. */
+async function loadLocalBooks() {
+  try {
+    const res = await fetch('books-private/index.json', { cache: 'no-cache' });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.books || []).map(b => Object.assign({}, b, { local: true }));
+  } catch {
+    return [];   // нет папки — это норма, а не поломка
+  }
+}
 
 async function loadPrivateBooks() {
   if (!backendReady()) return [];
@@ -2144,8 +2717,18 @@ async function loadPrivateBooks() {
   }
 }
 
+/* Одна и та же книга обычно есть и локально, и в бакете (папка проекта — исходник,
+   бакет — копия для других устройств). На полке она должна быть ОДНА, и побеждает
+   локальная: та же книга, но без сети, без подписанных URL и с офлайном. */
 async function refreshLibrary() {
-  library = staticLibrary.concat(await loadPrivateBooks());
+  const [local, backend] = await Promise.all([loadLocalBooks(), loadPrivateBooks()]);
+  const seen = new Set();
+  library = [];
+  for (const b of staticLibrary.concat(local, backend)) {
+    if (seen.has(b.id)) continue;
+    seen.add(b.id);
+    library.push(b);
+  }
 }
 
 async function renderAccount() {
@@ -2198,6 +2781,7 @@ $('#acc-signout').addEventListener('click', async () => {
 
 /* ===== старт ===== */
 async function init() {
+  migrateMarks();   // старые закладки/выделения → единые пометки (одноразово)
   applyTheme();
   applyLayout();
   applyAlign();

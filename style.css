@@ -640,29 +640,87 @@ mark.search-hit { background: var(--accent); color: var(--bg); border-radius: 3p
 /* сноска языка, который сейчас скрыт переключателем видимости */
 .pair.is-footnote.fn-hidden { display: none; }
 
-/* пользовательские выделения */
+/* ===== пометки: выделения в тексте =====
+   Цвета заданы полупрозрачными: одна и та же краска должна читаться и на светлой,
+   и на сепии, и на тёмной теме, а сам текст остаётся цветом темы. */
+:root {
+  --mk-yellow: rgba(240, 190, 40, 0.34);
+  --mk-green: rgba(90, 190, 110, 0.32);
+  --mk-blue: rgba(80, 160, 230, 0.30);
+  --mk-pink: rgba(230, 110, 180, 0.28);
+  --mk-red: rgba(225, 80, 70, 0.28);
+  /* Те же краски, но плотные: на трёхпиксельной грани списка и на кружке палитры
+     полупрозрачный вариант почти не виден. */
+  --mkb-yellow: #e0a81f;
+  --mkb-green: #46a862;
+  --mkb-blue: #3d86cc;
+  --mkb-pink: #d15c9c;
+  --mkb-red: #cf4a40;
+}
+body[data-theme="dark"] {
+  --mk-yellow: rgba(240, 200, 60, 0.28);
+  --mk-green: rgba(110, 210, 130, 0.26);
+  --mk-blue: rgba(110, 180, 240, 0.26);
+  --mk-pink: rgba(240, 130, 195, 0.24);
+  --mk-red: rgba(240, 110, 100, 0.26);
+}
+
 mark.hl {
-  background: var(--accent-soft);
+  background: var(--mk-yellow);
   color: inherit;
   border-radius: 2px;
   cursor: pointer;
-  box-shadow: inset 0 -0.12em 0 var(--accent-soft);
 }
+mark.hl-yellow { background: var(--mk-yellow); }
+mark.hl-green { background: var(--mk-green); }
+mark.hl-blue { background: var(--mk-blue); }
+mark.hl-pink { background: var(--mk-pink); }
+mark.hl-red { background: var(--mk-red); }
 
-/* плавающая кнопка «Выделить» над выделением текста */
+/* у пометки есть заметка — подчеркнём, иначе выделение с мыслью неотличимо от простого */
+mark.hl.has-note { box-shadow: inset 0 -0.14em 0 var(--accent); }
+
+/* ===== палитра (панель выделения и редактор пометки) ===== */
+.palette { display: inline-flex; gap: 0.25rem; align-items: center; }
+.swatch {
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 50%;
+  border: 1px solid rgba(128, 128, 128, 0.45);
+  cursor: pointer;
+  padding: 0;
+}
+.palette-lg { display: flex; gap: 0.45rem; margin: 0.5rem 0 0.2rem; }
+.palette-lg .swatch { width: 1.7rem; height: 1.7rem; }
+.swatch.on { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sw-yellow { background: var(--mkb-yellow); }
+.sw-green { background: var(--mkb-green); }
+.sw-blue { background: var(--mkb-blue); }
+.sw-pink { background: var(--mkb-pink); }
+.sw-red { background: var(--mkb-red); }
+
+/* плавающая панель над выделением текста */
 #sel-toolbar {
   position: fixed;
   z-index: 55;
-  padding: 0;
-}
-#sel-toolbar button {
-  padding: 0.4rem 0.7rem;
-  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.45rem;
+  border-radius: 10px;
   background: var(--fg);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+}
+/* :not(.swatch) обязательно — селектор с id перебил бы .sw-* и кружки палитры
+   вышли бы бесцветными (в редакторе пометки такого правила нет, и там всё красилось). */
+#sel-toolbar button:not(.swatch) {
+  padding: 0.3rem 0.55rem;
+  border-radius: 7px;
+  background: transparent;
   color: var(--bg);
   font-size: 0.85rem;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
 }
+#sel-toolbar .swatch { border-color: rgba(255, 255, 255, 0.5); }
 
 /* ===== переход к странице ===== */
 #page-popover {
@@ -949,3 +1007,134 @@ mark.hl {
   padding: 0.55rem 1rem;
   cursor: pointer;
 }
+
+/* ===== пометки: списки, редактор, вырезки ===== */
+.sub-count { color: var(--muted); font-size: 0.8em; font-weight: normal; }
+
+/* строка пометки: слева цветная грань — видно цвет, не открывая запись */
+.mark-item { align-items: flex-start; }
+.mark-item.is-clip { border-inline-start: 3px solid transparent; padding-inline-start: 0.45rem; }
+.mark-item.c-yellow { border-inline-start-color: var(--mkb-yellow); }
+.mark-item.c-green { border-inline-start-color: var(--mkb-green); }
+.mark-item.c-blue { border-inline-start-color: var(--mkb-blue); }
+.mark-item.c-pink { border-inline-start-color: var(--mkb-pink); }
+.mark-item.c-red { border-inline-start-color: var(--mkb-red); }
+.mark-item.is-bm { border-inline-start: 3px solid var(--accent); padding-inline-start: 0.45rem; }
+
+/* В списке цитата подрезается пятью строками — иначе одна длинная вырезка вытесняет
+   с экрана все остальные. Сама запись не трогается: полный текст виден в редакторе. */
+.mark-quote {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  line-clamp: 5;
+  overflow: hidden;
+  margin: 0.15rem 0;
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+.bm-meta { color: var(--muted); }
+.mark-tags { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-top: 0.25rem; }
+.mark-tag {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.05rem 0.5rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+/* редактор пометки */
+.mark-where { color: var(--muted); font-size: 0.85rem; margin: 0 0 0.4rem; }
+.mark-text {
+  margin: 0 0 0.6rem;
+  padding: 0.5rem 0.75rem;
+  border-inline-start: 3px solid var(--accent);
+  background: var(--accent-soft, rgba(128, 128, 128, 0.1));
+  border-radius: 0 6px 6px 0;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  max-height: 11rem;
+  overflow-y: auto;
+}
+#mark-note, #mark-tags, #clips-q {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+}
+#mark-note { resize: vertical; min-height: 4.5rem; }
+#clips-q { margin: 0.5rem 0 0.2rem; }
+.tag-chip { font-size: 0.78rem; padding: 0.15rem 0.6rem; }
+.chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.chip-new { border-style: dashed; }
+
+/* вырезки */
+.clips-tabs { margin: 0.2rem 0 0.4rem; }
+.clip-filters { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 0.4rem 0 0.2rem; }
+/* .sheet label — общий стиль «подпись слева, поле справа во всю ширину». Фильтрам он
+   не годится (они должны стоять в ряд), поэтому специфичность здесь выше нарочно. */
+.clip-filters .clip-filter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.3rem;
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.clip-filters .clip-filter select {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.15rem 0.3rem;
+  max-width: 11rem;
+}
+.clip-list, .coll-list { list-style: none; margin: 0.5rem 0 0; padding: 0; }
+.clips-empty { color: var(--muted); font-size: 0.9rem; margin: 1rem 0; }
+
+/* сборники */
+.coll-new { margin: 0.4rem 0; }
+.coll-list li { border-bottom: 1px solid var(--border); }
+.coll-open {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.65rem 0.2rem;
+  text-align: start;
+  background: transparent;
+  color: inherit;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+}
+.coll-count {
+  flex: none;
+  min-width: 1.6rem;
+  text-align: center;
+  border-radius: 999px;
+  background: var(--accent-soft, rgba(128, 128, 128, 0.15));
+  color: var(--muted);
+  font-size: 0.78rem;
+  padding: 0.1rem 0.45rem;
+}
+.coll-head { margin-bottom: 0.5rem; }
+.coll-head h3 { margin: 0.4rem 0 0.2rem; }
+.coll-tools { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.3rem; }
+
+/* Заметка и теги — поля во всю ширину под подписью: у .sheet label поле прижато вправо
+   и ужато до 55%, а сюда пишут предложениями. */
+.sheet label.stack {
+  display: block;
+  margin: 0.7rem 0;
+}
+.sheet label.stack > small { color: var(--muted); font-size: 0.8rem; }
+.sheet label.stack input, .sheet label.stack textarea { margin-top: 0.25rem; max-width: none; }
