@@ -159,12 +159,12 @@ async function mtViaMyMemory(text, from, to) {
   return out.join(' ');
 }
 
-async function mtViaClaude(text, from, to) {
+async function mtViaClaude(text, from, to, extra) {
   if (!(window.SB && SB.configured())) throw new Error('Бэкенд не настроен');
   const res = await fetch(SB.functionUrl('translate'), {
     method: 'POST',
     headers: await SB.functionHeaders(),
-    body: JSON.stringify({ text, from, to }),
+    body: JSON.stringify({ text, from, to, extra }),
   });
   const body = await res.text();
   let data = null;
@@ -189,18 +189,57 @@ const MT_LANG_NAMES = {
 };
 const mtLangName = code => MT_LANG_NAMES[code] || code;
 
-/* Тот же самый промпт, что и в Edge Function: перевод, а не пересказ, и без
-   преамбулы — результат вставляется в карточку как есть. Отдельно про
-   религиозный текст: там буквальность важнее гладкости, а догадки недопустимы. */
-function mtSystemPrompt(from, to) {
-  return [
-    `Ты переводчик. Переведи текст с ${mtLangName(from)} на ${mtLangName(to)}.`,
-    'Верни ТОЛЬКО перевод: без преамбулы, без пояснений, без кавычек вокруг ответа.',
+/* Тот же самый промпт, что и в Edge Function: перевод, а не пересказ. Отдельно про
+   религиозный текст: там буквальность важнее гладкости, а догадки недопустимы.
+   `extra` — просьба пользователя (разобрать, дать примеры…), см. MT_PROMPTS в app.js. */
+function mtSystemPrompt(from, to, extra) {
+  const parts = [`Ты переводчик. Переведи текст с ${mtLangName(from)} на ${mtLangName(to)}.`];
+  /* ⚠️ «Только перевод, без пояснений» держим ровно до тех пор, пока пояснений не
+     попросили: вместе с просьбой разобрать термины эта строка превращается в прямое
+     противоречие, и модель выполняет случайную половину — то куцый перевод без
+     разбора, то разбор вместо перевода. */
+  if (!extra) parts.push('Верни ТОЛЬКО перевод: без преамбулы, без пояснений, без кавычек вокруг ответа.');
+  parts.push(
     'Сохраняй абзацы, разметку и знаки препинания исходника.',
     'Если текст религиозный (Коран, хадис, богословие) — переводи буквально и осторожно:',
     'сохраняй устоявшиеся термины, не сглаживай и не додумывай смысл.',
     'Имена собственные и термины, у которых нет принятого соответствия, оставляй как есть.',
-  ].join(' ');
+  );
+  if (extra) parts.push('Пояснения давай на языке перевода.', extra);
+  return parts.join(' ');
+}
+
+/* ── команда ИИ: промпт-обёртка вокруг фрагмента ──────────────────────────────
+ * Есть два способа написать свою команду, и различаются они наличием {текст}:
+ *
+ *   без {текст} — просьба ПОВЕРХ перевода: «после перевода разбери термины».
+ *                 Фрагмент уходит отдельно, переводчик остаётся переводчиком.
+ *   с {текст}   — своя команда ЦЕЛИКОМ: «Объясни, что значит {текст} в акыде».
+ *                 Тогда это и есть запрос, а не добавка к переводу, и требование
+ *                 «верни только перевод» снимается — иначе оно прямо противоречит
+ *                 команде и модель выполняет случайную половину.
+ *
+ * Осторожность с религиозным текстом остаётся в обоих случаях: она не про формат
+ * ответа, а про цену ошибки.
+ */
+const MT_SLOT = /\{\s*(?:текст|фрагмент|text|selection)\s*\}/gi;
+// lastIndex сбрасываем руками: у глобальной регулярки .test() помнит позицию,
+// и каждый второй вызов на той же строке вернул бы false
+const mtHasSlot = s => { MT_SLOT.lastIndex = 0; return MT_SLOT.test(String(s || '')); };
+
+function mtMessages(text, from, to, extra) {
+  if (extra && mtHasSlot(extra)) {
+    return {
+      system: [
+        'Ты помогаешь читателю двуязычной книги разбирать её текст.',
+        `Фрагмент дан на языке: ${mtLangName(from)}. Отвечай на ${mtLangName(to)}, если не сказано иначе.`,
+        'Если текст религиозный (Коран, хадис, богословие) — будь буквален и осторожен:',
+        'сохраняй устоявшиеся термины, не сглаживай и не додумывай смысл.',
+      ].join(' '),
+      user: String(extra).replace(MT_SLOT, text),
+    };
+  }
+  return { system: mtSystemPrompt(from, to, extra), user: text };
 }
 
 /* Список моделей OpenRouter — публичный, без ключа. Нужен, чтобы выбор модели
@@ -226,10 +265,12 @@ async function mtModels() {
   })).sort((a, b) => a.id.localeCompare(b.id));
 }
 
-async function mtViaOpenRouter(text, from, to, model) {
+async function mtViaOpenRouter(text, from, to, model, extra) {
   const key = orKey();
   if (!key) throw new Error('Не задан ключ OpenRouter (настройки → «Перевод через ИИ»)');
   if (!model) throw new Error('Не выбрана модель (настройки → «Перевод через ИИ»)');
+
+  const req = mtMessages(text, from, to, extra);
 
   let res;
   try {
@@ -249,8 +290,8 @@ async function mtViaOpenRouter(text, from, to, model) {
         model,
         max_tokens: 4000,
         messages: [
-          { role: 'system', content: mtSystemPrompt(from, to) },
-          { role: 'user', content: text },
+          { role: 'system', content: req.system },
+          { role: 'user', content: req.user },
         ],
       }),
     });
@@ -286,7 +327,9 @@ async function mtViaOpenRouter(text, from, to, model) {
 /* ── публичная точка входа ────────────────────────────────────────────────── */
 /**
  * Перевести фрагмент. Возвращает { text, provider, cached }.
- * `opts.model` нужен только провайдеру openrouter.
+ * `opts.model` нужен только провайдеру openrouter;
+ * `opts.extra` — дополнительная просьба к ИИ (разобрать, дать примеры…),
+ * `opts.promptId` — её короткое имя, нужно только для ключа кэша.
  * Ошибки пробрасываются — показывает их вызывающая сторона.
  */
 async function mtTranslate(text, from, to, providerId, opts) {
@@ -298,14 +341,20 @@ async function mtTranslate(text, from, to, providerId, opts) {
   if (!provider.available()) throw new Error(`«${provider.label}» сейчас недоступен`);
 
   const model = (opts && opts.model) || '';
-  // модель — часть ключа кэша: один и тот же фрагмент у разных моделей переводится по-разному
-  const key = mtKey(src, from, to, providerId === 'openrouter' ? 'or/' + model : providerId);
+  const extra = (opts && opts.extra) || '';
+  const promptId = (opts && opts.promptId) || 'plain';
+  /* Модель и промпт — часть ключа кэша: тот же фрагмент у другой модели и с другой
+     просьбой даёт другой ответ, и склеить их в одну запись значит показать разбор
+     там, где просили короткий перевод. */
+  const tag = (providerId === 'openrouter' ? 'or/' + model : providerId)
+    + (providerId === 'mymemory' || promptId === 'plain' ? '' : '#' + promptId);
+  const key = mtKey(src, from, to, tag);
   const hit = mtCacheGet(key);
   if (hit) return { text: hit, provider, cached: true };
 
-  const out = providerId === 'openrouter' ? await mtViaOpenRouter(src, from, to, model)
-    : providerId === 'claude' ? await mtViaClaude(src, from, to)
-    : await mtViaMyMemory(src, from, to);
+  const out = providerId === 'openrouter' ? await mtViaOpenRouter(src, from, to, model, extra)
+    : providerId === 'claude' ? await mtViaClaude(src, from, to, extra)
+    : await mtViaMyMemory(src, from, to);   // словарный движок промпта не знает — и не притворяемся
 
   mtCacheSet(key, out);
   return { text: out, provider, cached: false };

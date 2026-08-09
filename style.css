@@ -506,6 +506,7 @@ body[data-layout="h"][data-colrtl] .pair > .member[dir="rtl"] {
 body[data-view="library"] #btn-home,
 body[data-view="library"] #btn-toc,
 body[data-view="library"] #btn-bookmark,
+body[data-view="library"] #btn-mtmode,
 body[data-view="library"] #btn-vis,
 body[data-view="library"] #btn-warn,
 body[data-view="library"] #bottombar { display: none !important; }
@@ -1297,4 +1298,100 @@ mark.hl.has-note { box-shadow: inset 0 -0.14em 0 var(--accent); }
   padding: 0.3rem 0.7rem;
   font-size: 0.82rem;
   background: var(--bg);
+}
+
+/* ===== режим перевода: своё выделение вместо системного =====
+   user-select: none — не украшение, а весь смысл: пока браузер считает, что
+   выделять нечего, он не рисует своё «Копировать / Поиск», и наша панель ничем
+   не перекрыта. -webkit-touch-callout гасит долгий тап в iOS. */
+body[data-mtmode] #stream .member {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  cursor: pointer;
+}
+body[data-mtmode] #stream { padding-bottom: 9rem; }   /* панель не должна закрывать текст */
+#btn-mtmode.on { color: var(--accent); }
+
+mark.mtsel {
+  background: var(--accent-soft);
+  box-shadow: inset 0 -2px 0 var(--accent);
+  border-radius: 3px;
+  color: inherit;
+}
+
+#mtsel-bar {
+  position: fixed;
+  /* ниже оверлеев (40): открытая панель настроек или оглавления должна накрывать
+     эту, а не наоборот. Выше нижней панели глав (20) — она под ней и стоит. */
+  z-index: 38;
+  left: 50%;
+  bottom: 3.4rem;   /* над панелью «‹ стр. N ›», иначе они наезжают друг на друга */
+  transform: translateX(-50%);
+  width: min(34rem, calc(100vw - 1.2rem));
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.55rem 0.7rem calc(0.55rem + env(safe-area-inset-bottom));
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: 0 6px 28px rgba(0, 0, 0, 0.28);
+}
+.mtsel-head { display: flex; align-items: flex-start; gap: 0.5rem; }
+.mtsel-preview {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.85rem;
+  line-height: 1.35;
+  max-height: 3.6em;
+  overflow: hidden;
+}
+.mtsel-preview.mtsel-empty { color: var(--muted); font-size: 0.78rem; }
+#mtsel-off { flex: none; padding: 0.1rem 0.35rem; color: var(--muted); }
+.mtsel-actions { display: flex; gap: 0.4rem; }
+.mtsel-actions button {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.85rem;
+  background: var(--bg);
+}
+.mtsel-actions button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.mtsel-actions button:disabled { opacity: 0.45; }
+
+/* ===== промпты перевода ===== */
+.mt-prompts { display: flex; flex-wrap: wrap; gap: 0.25rem; flex-basis: 100%; }
+.mt-prompt {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.18rem 0.6rem;
+  font-size: 0.76rem;
+  background: var(--bg);
+  color: var(--muted);
+  cursor: pointer;
+}
+.mt-prompt.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+.mt-prompt-list { list-style: none; margin: 0.3rem 0; padding: 0; display: flex; flex-direction: column; gap: 0.4rem; }
+.mt-prompt-item {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 0.45rem 0.6rem;
+}
+.mt-prompt-item.built-in { opacity: 0.75; }
+.mt-prompt-name { font-size: 0.85rem; font-weight: 600; }
+.mt-prompt-text { font-size: 0.78rem; color: var(--muted); margin-top: 0.15rem; }
+.mt-prompt-actions { display: flex; gap: 0.4rem; margin-top: 0.35rem; }
+.mt-prompt-actions button { font-size: 0.76rem; color: var(--accent); }
+#mt-prompt-form { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.4rem; }
+#mt-prompt-form input, #mt-prompt-form textarea {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
 }

@@ -23,6 +23,7 @@
   <button id="btn-search" type="button" title="Поиск (по книге или по всей библиотеке)">🔍</button>
   <button id="btn-bookmark" type="button" title="Закладка на текущем месте">🔖</button>
   <button id="btn-clips" type="button" title="Вырезки и сборники — всё, что вы выделили и записали">✂</button>
+  <button id="btn-mtmode" type="button" title="Режим перевода: тап по слову — выделить, тап по второму — фраза целиком">⇄</button>
   <div id="chapter-title">Загрузка…</div>
   <button id="btn-warn" type="button" title="Ошибки контракта" hidden>⚠</button>
   <button id="btn-filter" type="button" title="Фильтры">⛃<span id="filter-count" class="filter-badge" hidden></span></button>
@@ -170,6 +171,20 @@
       <button type="button" id="mt-model-reload">↻ Обновить список моделей</button>
     </div>
     <p class="about-line acc-note">Список берётся с самого OpenRouter, поэтому в нём всегда актуальные модели и цены (за миллион токенов). Платит владелец ключа — то есть вы.</p>
+
+    <h3 class="sheet-sub">Свои промпты</h3>
+    <p class="about-line acc-note">Промпт — своя команда ИИ. Выбирается прямо в карточке перевода, так что один и тот же фрагмент можно переспросить по-разному. Встроенные менять нельзя, свои — сколько угодно.</p>
+    <p class="about-line acc-note">Есть два вида команд, и различает их слово <b>{текст}</b>:</p>
+    <ul class="acc-note">
+      <li><b>Без {текст}</b> — просьба <i>поверх перевода</i>. «После перевода разбери термины» → сначала перевод, потом разбор.</li>
+      <li><b>Со {текст}</b> — своя команда <i>целиком</i>, куда подставляется выделенное. «Объясни, что значит {текст} в этом контексте» → перевода не будет, будет ответ на вашу команду.</li>
+    </ul>
+    <ul id="mt-prompt-list" class="mt-prompt-list"></ul>
+    <form id="mt-prompt-form">
+      <input id="mt-prompt-name" type="text" placeholder="Название (например: «Для заучивания»)" autocomplete="off">
+      <textarea id="mt-prompt-text" rows="3" placeholder="Например: «Разбей фразу на части и к каждой дай перевод, чтобы было удобно заучивать». Или со слотом: «Разбери {текст} по корням слов»."></textarea>
+      <button type="submit" class="primary">Сохранить промпт</button>
+    </form>
   </div>
 </div>
 
@@ -288,11 +303,28 @@
   </div>
   <div id="mt-body" class="mt-body"></div>
   <div class="mt-foot">
+    <span id="mt-prompts" class="mt-prompts"></span>
     <span id="mt-providers" class="mt-providers"></span>
     <span class="mt-actions">
       <button id="mt-to-note" type="button">✎ В заметку</button>
       <button id="mt-copy" type="button">⧉ Копировать</button>
     </span>
+  </div>
+</div>
+
+<!-- Режим перевода: системного выделения тут нет вовсе (user-select: none), поэтому
+     браузер не показывает своё «Копировать / Поиск» и ничего не перекрывает.
+     Слово выбирается тапом, фраза — вторым тапом, панель прижата к низу экрана. -->
+<div id="mtsel-bar" hidden>
+  <div class="mtsel-head">
+    <span id="mtsel-preview" class="mtsel-preview"></span>
+    <button id="mtsel-off" type="button" title="Выйти из режима перевода">✕</button>
+  </div>
+  <div id="mtsel-prompts" class="mt-prompts"></div>
+  <div class="mtsel-actions">
+    <button id="mtsel-all" type="button">Весь абзац</button>
+    <button id="mtsel-clear" type="button">Снять</button>
+    <button id="mtsel-go" type="button" class="primary">⇄ Перевести</button>
   </div>
 </div>
 

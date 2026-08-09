@@ -25,6 +25,8 @@ const DEFAULTS = {
   readDays: [],        // ['YYYY-MM-DD', …] — дни, когда что-то читали
   mtProvider: 'mymemory',  // последний выбранный движок машинного перевода
   mtModel: '',             // модель OpenRouter (id из его каталога); ключ — НЕ здесь, см. translate.js
+  mtPrompt: 'plain',       // выбранный промпт перевода (id встроенного или своего)
+  mtPrompts: [],           // свои промпты: [{ id, label, text }]
   marks: {},           // bookId → [пометка] — см. «пометки» ниже
   collections: [],     // сквозные тематические сборники из пометок
   // ↓ старые ключи: читаются один раз при миграции в marks и больше не пишутся
@@ -249,6 +251,8 @@ async function loadChapter(i, targetId) {
   $('#chapter-title').textContent = pickTitle(book.chapters[i].title);
   if (warnings.length) console.warn(`Контракт, ${book.chapters[i].file}:`, warnings);
   renderChapter();
+  // выделение режима перевода указывало в прежнюю главу — её узлов больше нет
+  if (typeof clearMtSel === 'function') clearMtSel();
   renderDebug();
   markTocCurrent();
   setLast(bookId, { chapter: i });
@@ -1167,7 +1171,78 @@ const mtProvider = () =>
   || (mtAvailable().find(p => p.ready) || {}).id
   || 'mymemory';
 
-function closeMt() { $('#mt-card').hidden = true; }
+/* ===== промпты перевода =====
+ * Промпт — просьба ПОВЕРХ перевода: разобрать термины, дать примеры, объяснить
+ * грамматику. Встроенные неизменяемы, свои живут в settings.mtPrompts (это не
+ * секрет, поэтому им место именно в настройках и в резервной копии).
+ *
+ * `plain` особый: у него пустой текст, и тогда в системный промпт возвращается
+ * строка «только перевод, без пояснений» (см. mtSystemPrompt в translate.js).
+ */
+const MT_PROMPTS_BUILTIN = [
+  { id: 'plain', label: 'Точно', text: '' },
+  {
+    id: 'literal', label: 'Дословно',
+    text: 'Дай два варианта, каждый со своей строки: сначала «Дословно:» — подстрочник, '
+      + 'слово за словом, даже если звучит коряво; затем «Литературно:» — гладкий перевод.',
+  },
+  {
+    id: 'explain', label: 'Подробно',
+    text: 'После перевода добавь раздел «Разбор»: ключевые слова и термины, их корни '
+      + 'и оттенки смысла, и почему выбран именно такой вариант перевода. Кратко, по пунктам.',
+  },
+  {
+    id: 'examples', label: 'С примерами',
+    text: 'После перевода добавь раздел «Примеры»: 2–3 других употребления ключевых слов '
+      + 'и выражений этого фрагмента, каждое с переводом.',
+  },
+  {
+    id: 'grammar', label: 'Грамматика',
+    text: 'После перевода добавь раздел «Грамматика»: части речи, форма слова, падеж '
+      + 'или огласовка окончания, синтаксическая роль. Только то, что есть во фрагменте.',
+  },
+];
+
+const mtPromptAll = () => MT_PROMPTS_BUILTIN.concat(settings.mtPrompts || []);
+const mtPromptById = id => mtPromptAll().find(p => p.id === id) || MT_PROMPTS_BUILTIN[0];
+const mtPromptCur = () => mtPromptById(settings.mtPrompt || 'plain');
+
+/* Чипсы выбора промпта. Живут в двух местах — в панели режима перевода (выбрать до
+   запроса) и в карточке результата (переспросить иначе, не выделяя заново). */
+function renderPromptChips(box, onPick) {
+  if (!box) return;
+  box.innerHTML = '';
+  const curId = mtPromptCur().id;
+  for (const p of mtPromptAll()) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'mt-prompt' + (p.id === curId ? ' on' : '');
+    b.textContent = p.label;
+    b.title = p.text || 'Просто перевод, без пояснений';
+    b.addEventListener('click', () => {
+      settings.mtPrompt = p.id;
+      saveSettings();
+      onPick(p);
+    });
+    box.appendChild(b);
+  }
+}
+
+/* Промпт понимают только ИИ-движки: MyMemory — словарь, у него нет куда положить
+   просьбу. Молча отдать словарный перевод на просьбу «разбери грамматику» — обман,
+   поэтому переключаем движок сами, а если ИИ не настроен — говорим прямо. */
+function mtProviderForPrompt(promptId, current) {
+  if (promptId === 'plain' || current !== 'mymemory') return current;
+  const ai = mtAvailable().find(p => p.ready && p.id !== 'mymemory');
+  if (ai) return ai.id;
+  toast('Промпты работают только с ИИ — задайте ключ в настройках');
+  return current;
+}
+
+function closeMt() {
+  $('#mt-card').hidden = true;
+  if (mtModeOn()) $('#mtsel-bar').hidden = false;   // вернуть панель режима, если он ещё включён
+}
 
 /* Переводим СРАЗУ, без промежуточного меню выбора.
    Меню висело под панелью выделения — ровно там же, где браузер рисует своё
@@ -1206,8 +1281,12 @@ function renderMtProviders(active) {
 async function runTranslate(providerId) {
   if (!mtPending) return;
   const { text, from, to } = mtPending;
+  const prompt = mtPromptCur();
+  providerId = mtProviderForPrompt(prompt.id, providerId);
   settings.mtProvider = providerId;
   saveSettings();
+  // панель режима перевода прячем на время карточки: иначе две панели у нижнего края
+  if (mtModeOn()) $('#mtsel-bar').hidden = true;
 
   // снять выделение сразу — заодно закрывается системное меню браузера
   hideSelToolbar();
@@ -1215,17 +1294,22 @@ async function runTranslate(providerId) {
   if (s) s.removeAllRanges();
 
   const body = $('#mt-body');
-  $('#mt-source').textContent = `${langName(from)} → ${langName(to)}`;
+  const label = () => `${langName(from)} → ${langName(to)}`
+    + (prompt.id === 'plain' ? '' : ' · ' + prompt.label);
+  $('#mt-source').textContent = label();
   body.textContent = 'Перевожу…';
   body.classList.remove('mt-error');
   renderMtProviders(providerId);
+  // смена промпта прямо в карточке — переспросить тем же выделением, не выделяя заново
+  renderPromptChips($('#mt-prompts'), () => runTranslate(providerId));
   $('#mt-card').hidden = false;
 
   try {
-    const r = await mtTranslate(text, from, to, providerId, { model: settings.mtModel });
+    const r = await mtTranslate(text, from, to, providerId, {
+      model: settings.mtModel, extra: prompt.text, promptId: prompt.id,
+    });
     body.textContent = r.text;
-    $('#mt-source').textContent =
-      `${langName(from)} → ${langName(to)}${r.cached ? ' · из кэша' : ''}`;
+    $('#mt-source').textContent = label() + (r.cached ? ' · из кэша' : '');
     mtPending.result = r.text;
   } catch (err) {
     body.textContent = err.message;
@@ -1253,7 +1337,8 @@ bindClick('#mt-to-note', () => {
   list.push({
     id: newMarkId(), chapter: chapterIndex, sector: activeEl ? activeEl.dataset.id : 's001',
     lang: mtPending.from, start: null, end: null, color: null,
-    note: '[машинный перевод] ' + t, tags: ['машинный перевод'],
+    note: `[машинный перевод${mtPromptCur().id === 'plain' ? '' : ' · ' + mtPromptCur().label}] ` + t,
+    tags: ['машинный перевод'],
     text: mtPending.text, page: currentPage(), ts: Date.now(), edited: 0,
   });
   saveSettings();
@@ -1261,6 +1346,202 @@ bindClick('#mt-to-note', () => {
   buildMarkPanel();
   closeMt();
   toast('Сохранено в пометки');
+});
+
+/* ===== РЕЖИМ ПЕРЕВОДА: выделение без системного меню =====
+ * Обычное выделение текста на телефоне бесполезно для перевода: браузер сам рисует
+ * над ним «Копировать / Поиск / Поделиться», и это меню перекрывает нашу панель —
+ * до кнопки перевода просто не дотянуться. Спорить с системным меню нельзя, его
+ * не подвинуть и не убрать.
+ *
+ * Поэтому здесь системного выделения НЕТ ВОВСЕ: в режиме перевода текст получает
+ * `user-select: none`, браузеру нечего показывать — и меню не появляется. Выделение
+ * своё: тап по слову берёт слово, тап по второму слову растягивает до фразы, кнопка
+ * берёт абзац целиком. Панель прижата к низу экрана, далеко от пальца и от текста.
+ *
+ * ⚠️ Не «чинить» это возвращением обычного выделения — оно и было причиной.
+ */
+const mtSel = { member: null, start: 0, end: 0, anchor: null };
+
+const mtModeOn = () => document.body.dataset.mtmode === '1';
+
+/* Символьное смещение точки экрана внутри члена пары. Смещения считаем по
+   textContent — та же система координат, что у пометок и поиска. */
+function caretOffset(member, x, y) {
+  let node = null, off = 0;
+  if (document.caretRangeFromPoint) {
+    const r = document.caretRangeFromPoint(x, y);
+    if (!r) return null;
+    node = r.startContainer; off = r.startOffset;
+  } else if (document.caretPositionFromPoint) {
+    const p = document.caretPositionFromPoint(x, y);
+    if (!p) return null;
+    node = p.offsetNode; off = p.offset;
+  } else return null;
+  if (!node || !member.contains(node)) return null;
+  if (node.nodeType !== 3) return null;
+  const walker = document.createTreeWalker(member, NodeFilter.SHOW_TEXT);
+  let pos = 0, n;
+  while ((n = walker.nextNode())) {
+    if (n === node) return pos + off;
+    pos += n.nodeValue.length;
+  }
+  return null;
+}
+
+/* Границы слова вокруг позиции. Intl.Segmenter знает про арабскую вязь и огласовки
+   куда лучше любой регулярки; запасной путь — на случай старых движков. Если палец
+   попал в пробел или знак препинания, берём ближайшее слово, а не пустоту: иначе
+   аккуратный тап по короткому слову часто не давал бы ничего. */
+function wordAt(text, pos) {
+  if (typeof Intl !== 'undefined' && Intl.Segmenter) {
+    const segs = [...new Intl.Segmenter(undefined, { granularity: 'word' }).segment(text)]
+      .filter(s => s.isWordLike);
+    if (!segs.length) return null;
+    let best = null, bestDist = Infinity;
+    for (const s of segs) {
+      const start = s.index, end = s.index + s.segment.length;
+      if (pos >= start && pos < end) return { start, end };
+      const d = pos < start ? start - pos : pos - end;
+      if (d < bestDist) { bestDist = d; best = { start, end }; }
+    }
+    return bestDist <= 2 ? best : null;   // далеко от слов — считаем, что промах
+  }
+  const re = /[\p{L}\p{M}\p{N}_'’ـ-]+/gu;
+  let m, best = null, bestDist = Infinity;
+  while ((m = re.exec(text))) {
+    const start = m.index, end = start + m[0].length;
+    if (pos >= start && pos < end) return { start, end };
+    const d = pos < start ? start - pos : pos - end;
+    if (d < bestDist) { bestDist = d; best = { start, end }; }
+  }
+  return bestDist <= 2 ? best : null;
+}
+
+/* Подкраска диапазона по кускам текстовых узлов. Отдельно от highlightRange:
+   тот зовёт surroundContents на весь диапазон и молча ничего не красит, стоит
+   фразе пересечь <b> или ссылку на сноску — а невидимое выделение хуже, чем
+   никакого. Здесь каждый кусок оборачивается в своём узле, так что пересечения
+   разметки не мешают. */
+function paintParts(root, start, end, cls) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const jobs = [];
+  let pos = 0, n;
+  while ((n = walker.nextNode())) {
+    const len = n.nodeValue.length;
+    const s = Math.max(start, pos), e = Math.min(end, pos + len);
+    if (e > s) jobs.push({ node: n, s: s - pos, e: e - pos });
+    pos += len;
+    if (pos >= end) break;
+  }
+  for (const j of jobs) {
+    try {
+      const r = document.createRange();
+      r.setStart(j.node, j.s);
+      r.setEnd(j.node, j.e);
+      const mark = document.createElement('mark');
+      mark.className = cls;
+      r.surroundContents(mark);
+    } catch { /* кусок не обернулся — остальные всё равно покрасим */ }
+  }
+}
+
+function paintMtSel() {
+  stream.querySelectorAll('mark.mtsel').forEach(unwrap);
+  if (!mtSel.member || mtSel.end <= mtSel.start) return;
+  paintParts(mtSel.member, mtSel.start, mtSel.end, 'mtsel');
+}
+
+function mtSelText() {
+  if (!mtSel.member || mtSel.end <= mtSel.start) return '';
+  return mtSel.member.textContent.slice(mtSel.start, mtSel.end).replace(/\s+/g, ' ').trim();
+}
+
+function clearMtSel() {
+  mtSel.member = null; mtSel.anchor = null; mtSel.start = 0; mtSel.end = 0;
+  paintMtSel();
+  updateMtSelBar();
+}
+
+function updateMtSelBar() {
+  const prev = $('#mtsel-preview');
+  if (!prev) return;
+  const txt = mtSelText();
+  prev.textContent = txt ? (txt.length > 100 ? txt.slice(0, 100) + '…' : txt)
+    : 'Тап по слову — выделить. Тап по второму — вся фраза между ними.';
+  prev.classList.toggle('mtsel-empty', !txt);
+  $('#mtsel-go').disabled = !txt;
+  $('#mtsel-clear').disabled = !txt;
+}
+
+/* Тап в режиме перевода. Capture + stopPropagation: ниже по дереву висит обычный
+   обработчик чтения (раскрыть второй язык, открыть пометку), и в этом режиме он
+   только мешал бы. */
+stream.addEventListener('click', e => {
+  if (!mtModeOn()) return;
+  const member = e.target.closest && e.target.closest('.member');
+  if (!member || !stream.contains(member)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const off = caretOffset(member, e.clientX, e.clientY);
+  if (off === null) return;
+  const w = wordAt(member.textContent, off);
+  if (!w) return;
+  if (mtSel.member === member && mtSel.anchor) {
+    // второй тап — растянуть от слова-якоря до этого слова (в любую сторону)
+    mtSel.start = Math.min(mtSel.anchor.start, w.start);
+    mtSel.end = Math.max(mtSel.anchor.end, w.end);
+  } else {
+    mtSel.member = member;
+    mtSel.anchor = w;
+    mtSel.start = w.start;
+    mtSel.end = w.end;
+  }
+  paintMtSel();
+  updateMtSelBar();
+}, true);
+
+// перерисовка нужна ради подсветки выбранного: сам выбор уже сохранён в settings
+function refreshMtselPrompts() { renderPromptChips($('#mtsel-prompts'), refreshMtselPrompts); }
+
+function setMtMode(on) {
+  if (on && !book) { toast('Сначала откройте книгу'); return; }
+  if (on) document.body.dataset.mtmode = '1';
+  else delete document.body.dataset.mtmode;
+  $('#btn-mtmode').classList.toggle('on', on);
+  $('#mtsel-bar').hidden = !on;
+  clearMtSel();
+  if (on) {
+    hideSelToolbar();
+    const s = window.getSelection();
+    if (s) s.removeAllRanges();
+    refreshMtselPrompts();
+    toast('Режим перевода: тап по слову');
+  } else {
+    closeMt();
+  }
+}
+
+bindClick('#btn-mtmode', () => setMtMode(!mtModeOn()));
+bindClick('#mtsel-off', () => setMtMode(false));
+bindClick('#mtsel-clear', clearMtSel);
+bindClick('#mtsel-all', () => {
+  // абзац целиком: либо тот, где уже выделяли, либо текущий по прокрутке
+  const member = mtSel.member || (activeEl && activeEl.querySelector('.member'));
+  if (!member) { toast('Сначала тапните по абзацу'); return; }
+  mtSel.member = member;
+  mtSel.anchor = null;
+  mtSel.start = 0;
+  mtSel.end = member.textContent.length;
+  paintMtSel();
+  updateMtSelBar();
+});
+bindClick('#mtsel-go', () => {
+  const text = mtSelText();
+  if (!text) return;
+  const from = mtSel.member.getAttribute('lang') || (book && book.languages[0]) || 'en';
+  mtPending = { text, from, to: mtTargetFor(from), result: null };
+  runTranslate(mtProvider());
 });
 
 /* ===== настройка перевода через ИИ (ключ OpenRouter + модель) =====
@@ -1365,10 +1646,82 @@ async function loadMtModels(force) {
   renderMtModelState();
 }
 
+/* Свои промпты: встроенные показываем только для справки (их текст полезно
+   подсмотреть, сочиняя свой), редактируются и удаляются лишь пользовательские. */
+function renderMtPromptList() {
+  const list = $('#mt-prompt-list');
+  if (!list) return;
+  list.innerHTML = '';
+  for (const p of mtPromptAll()) {
+    const own = (settings.mtPrompts || []).some(x => x.id === p.id);
+    const li = document.createElement('li');
+    li.className = 'mt-prompt-item' + (own ? '' : ' built-in');
+    const head = document.createElement('div');
+    head.className = 'mt-prompt-name';
+    head.textContent = p.label + (own ? '' : ' · встроенный');
+    const body = document.createElement('div');
+    body.className = 'mt-prompt-text';
+    body.textContent = p.text || 'Просто перевод, без пояснений.';
+    li.append(head, body);
+    if (own) {
+      const actions = document.createElement('div');
+      actions.className = 'mt-prompt-actions';
+      const edit = document.createElement('button');
+      edit.type = 'button';
+      edit.textContent = '✎ Править';
+      edit.addEventListener('click', () => {
+        $('#mt-prompt-name').value = p.label;
+        $('#mt-prompt-text').value = p.text;
+        $('#mt-prompt-form').dataset.editing = p.id;
+        $('#mt-prompt-name').focus();
+      });
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.textContent = '🗑 Удалить';
+      del.addEventListener('click', () => {
+        settings.mtPrompts = (settings.mtPrompts || []).filter(x => x.id !== p.id);
+        // выбранным был именно он — вернуться к обычному переводу, а не к пустоте
+        if (settings.mtPrompt === p.id) settings.mtPrompt = 'plain';
+        saveSettings();
+        renderMtPromptList();
+        refreshMtselPrompts();
+      });
+      actions.append(edit, del);
+      li.appendChild(actions);
+    }
+    list.appendChild(li);
+  }
+}
+
+if ($('#mt-prompt-form')) {
+  $('#mt-prompt-form').addEventListener('submit', e => {
+    e.preventDefault();
+    const label = $('#mt-prompt-name').value.trim();
+    const text = $('#mt-prompt-text').value.trim();
+    if (!label || !text) { toast('Нужны и название, и текст промпта'); return; }
+    const editing = $('#mt-prompt-form').dataset.editing;
+    settings.mtPrompts = settings.mtPrompts || [];
+    if (editing) {
+      const p = settings.mtPrompts.find(x => x.id === editing);
+      if (p) { p.label = label; p.text = text; }
+      delete $('#mt-prompt-form').dataset.editing;
+    } else {
+      settings.mtPrompts.push({ id: 'u' + Date.now().toString(36), label, text });
+    }
+    saveSettings();
+    $('#mt-prompt-name').value = '';
+    $('#mt-prompt-text').value = '';
+    renderMtPromptList();
+    refreshMtselPrompts();
+    toast('Промпт сохранён');
+  });
+}
+
 function openMtSetup() {
   $('#settings').hidden = true;
   renderMtKeyState();
   $('#mt-model').value = settings.mtModel;
+  renderMtPromptList();
   openOverlay($('#mtset'));
   loadMtModels(false);
 }
@@ -2123,7 +2476,11 @@ function closeTopPopup() {
   return closed;
 }
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { if (closeTopPopup()) consumeOverlayMark(); return; }
+  if (e.key === 'Escape') {
+    if (closeTopPopup()) { consumeOverlayMark(); return; }
+    if (mtModeOn()) setMtMode(false);
+    return;
+  }
   const tag = (e.target.tagName || '').toLowerCase();
   if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
   if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -2879,6 +3236,7 @@ function renderBookList(shown, view, host) {
 
 function renderLibrary() {
   document.body.dataset.view = 'library';
+  if (mtModeOn()) setMtMode(false);   // режим перевода живёт только внутри книги
   book = null;
   document.title = 'Библиотека Таухид';
   $('#chapter-title').textContent = library.length ? 'Библиотека Таухид' : 'Список книг пуст';
@@ -3024,6 +3382,7 @@ function renderLibrary() {
 /* ===== карточка книги: большая обложка, автор, аннотация, кнопки чтения ===== */
 async function renderBookInfo(entry) {
   document.body.dataset.view = 'library';
+  if (mtModeOn()) setMtMode(false);
   book = null;
   document.title = entryLabel(entry);
   $('#chapter-title').textContent = entryLabel(entry);
