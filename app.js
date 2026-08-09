@@ -1524,7 +1524,7 @@ function setMtMode(on) {
     const s = window.getSelection();
     if (s) s.removeAllRanges();
     refreshMtselPrompts();
-    toast('Режим перевода: тап по слову');
+    toast('Тап по слову. Второй тап — до конца фразы');
   } else {
     closeMt();
   }
