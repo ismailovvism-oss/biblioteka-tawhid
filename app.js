@@ -284,6 +284,7 @@ function buildMembers(pair, target) {
 }
 
 function renderChapter() {
+  detachMtCard();          // иначе innerHTML = '' уничтожит карточку вместе с обработчиками
   stream.innerHTML = '';
   activeEl = null;
   fnJump = null;
@@ -1239,8 +1240,44 @@ function mtProviderForPrompt(promptId, current) {
   return current;
 }
 
+/* Карточка результата встаёт ПОД абзацем, а не всплывашкой поверх текста: так её
+   видно вместе с тем, что переводишь, и она ничего не заслоняет. Узел один и тот же,
+   он просто переезжает в поток и обратно.
+   ⚠️ Под абзацем — но НЕ внутри пары: машинный перевод по-прежнему не попадает в
+   поток секторов (см. шапку translate.js). Его отделяют плашка «⚡ машинный перевод»,
+   своя рамка и то, что он исчезает при закрытии и при смене главы — рядом с
+   выверенным человеческим переводом спутать их нельзя. */
+function placeMtCard(pairEl) {
+  const card = $('#mt-card');
+  if (pairEl && pairEl.parentNode === stream) {
+    card.classList.add('mt-inline');
+    /* Встаём ПОСЛЕ развёрнутых сносок этого абзаца, а не между ним и ими:
+       toggleInlineFn ищет свою сноску, шагая по соседям и останавливаясь на первом
+       не-.fn-inline. Влезь карточка в середину — повторный тап по ссылке не нашёл бы
+       раскрытую сноску и открыл бы вторую такую же. */
+    let anchor = pairEl;
+    while (anchor.nextElementSibling && anchor.nextElementSibling.classList.contains('fn-inline')) {
+      anchor = anchor.nextElementSibling;
+    }
+    anchor.insertAdjacentElement('afterend', card);
+  } else {
+    detachMtCard();   // абзац неизвестен (например, поиск) — прежнее поведение, поверх текста
+  }
+}
+
+/* Вернуть карточку из потока в body. Обязательно ПЕРЕД перерисовкой главы:
+   renderChapter чистит stream через innerHTML, и карточка вместе со всеми
+   обработчиками была бы уничтожена — перевод перестал бы работать до перезагрузки. */
+function detachMtCard() {
+  const card = $('#mt-card');
+  if (!card) return;
+  card.classList.remove('mt-inline');
+  if (card.parentNode !== document.body) document.body.appendChild(card);
+}
+
 function closeMt() {
   $('#mt-card').hidden = true;
+  detachMtCard();
   if (mtModeOn()) $('#mtsel-bar').hidden = false;   // вернуть панель режима, если он ещё включён
 }
 
@@ -1257,7 +1294,10 @@ function startTranslate() {
   const member = el.closest('.member');
   if (!member) return;
   const from = member.getAttribute('lang') || (book && book.languages[0]) || 'en';
-  mtPending = { text: sel.toString().trim(), from, to: mtTargetFor(from), result: null };
+  mtPending = {
+    text: sel.toString().trim(), from, to: mtTargetFor(from),
+    pair: member.closest('.pair'), result: null,
+  };
   runTranslate(mtProvider());
 }
 
@@ -1285,8 +1325,10 @@ async function runTranslate(providerId) {
   providerId = mtProviderForPrompt(prompt.id, providerId);
   settings.mtProvider = providerId;
   saveSettings();
-  // панель режима перевода прячем на время карточки: иначе две панели у нижнего края
-  if (mtModeOn()) $('#mtsel-bar').hidden = true;
+  // карточка встаёт под абзацем — панель режима внизу ей больше не мешает и остаётся
+  // на месте: можно сразу выделять следующий фрагмент
+  placeMtCard(mtPending.pair);
+  if (mtModeOn()) $('#mtsel-bar').hidden = !$('#mt-card').classList.contains('mt-inline');
 
   // снять выделение сразу — заодно закрывается системное меню браузера
   hideSelToolbar();
@@ -1311,6 +1353,10 @@ async function runTranslate(providerId) {
     body.textContent = r.text;
     $('#mt-source').textContent = label() + (r.cached ? ' · из кэша' : '');
     mtPending.result = r.text;
+    // ответ бывает длинным и уезжает за нижний край — подтянуть, но только если правда нужно
+    if ($('#mt-card').classList.contains('mt-inline')) {
+      $('#mt-card').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
   } catch (err) {
     body.textContent = err.message;
     body.classList.add('mt-error');
@@ -1361,7 +1407,7 @@ bindClick('#mt-to-note', () => {
  *
  * ⚠️ Не «чинить» это возвращением обычного выделения — оно и было причиной.
  */
-const mtSel = { member: null, start: 0, end: 0, anchor: null };
+const mtSel = { member: null, start: 0, end: 0, anchor: null, lastMember: null, lastTap: 0 };
 
 const mtModeOn = () => document.body.dataset.mtmode === '1';
 
@@ -1483,6 +1529,21 @@ stream.addEventListener('click', e => {
   if (!member || !stream.contains(member)) return;
   e.preventDefault();
   e.stopPropagation();
+  /* Двойной тап по тому же абзацу — весь абзац целиком. Кнопка «Весь абзац» в панели
+     есть, но тянуться к ней ради самого частого действия неудобно. */
+  const now = Date.now();
+  if (mtSel.lastMember === member && now - (mtSel.lastTap || 0) < 400) {
+    mtSel.lastTap = 0;
+    mtSel.anchor = null;
+    mtSel.start = 0;
+    mtSel.end = member.textContent.length;
+    paintMtSel();
+    updateMtSelBar();
+    return;
+  }
+  mtSel.lastMember = member;
+  mtSel.lastTap = now;
+
   const off = caretOffset(member, e.clientX, e.clientY);
   if (off === null) return;
   const w = wordAt(member.textContent, off);
@@ -1548,7 +1609,10 @@ bindClick('#mtsel-go', () => {
   const text = mtSelText();
   if (!text) return;
   const from = mtSel.member.getAttribute('lang') || (book && book.languages[0]) || 'en';
-  mtPending = { text, from, to: mtTargetFor(from), result: null };
+  mtPending = {
+    text, from, to: mtTargetFor(from),
+    pair: mtSel.member.closest('.pair'), result: null,
+  };
   runTranslate(mtProvider());
 });
 

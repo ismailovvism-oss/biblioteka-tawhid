@@ -1399,3 +1399,20 @@ mark.mtsel {
   background: var(--bg);
   color: var(--fg);
 }
+
+/* ===== карточка перевода ПОД абзацем =====
+   Смысл встроенного вида: перевод виден вместе с тем, что переводишь, и ничего
+   не заслоняет. Селектор с id+классом — иначе правила #mt-card (fixed, transform)
+   перебили бы позиционирование обратно во всплывашку.
+   ⚠️ Плашка «⚡ машинный перевод» и акцентная грань — не украшение: этот текст
+   стоит вплотную к выверенному человеческому переводу, и спутать их нельзя. */
+#mt-card.mt-inline {
+  position: static;
+  transform: none;
+  width: auto;
+  max-height: none;
+  margin: 0.4rem 0 1.1rem;
+  border-inline-start: 3px solid var(--accent);
+  box-shadow: none;
+}
+#mt-card.mt-inline .mt-body { overflow: visible; max-height: none; }
