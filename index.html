@@ -120,6 +120,7 @@
     <label class="row">Режим проверки (валидатор)
       <input id="set-debug" type="checkbox">
     </label>
+    <button type="button" id="btn-mtset" class="link-btn">⇄ Перевод через ИИ</button>
     <button type="button" id="btn-account" class="link-btn">👤 Аккаунт</button>
     <button type="button" id="btn-stats" class="link-btn">📊 Статистика</button>
     <button type="button" id="btn-help" class="link-btn">❔ Справка</button>
@@ -138,6 +139,37 @@
     <p class="about-line acc-note">Пароля нет: на почту приходит ссылка, по ней и происходит вход. Регистрация закрыта — ссылка сработает только для владельца библиотеки.</p>
     <p class="about-line acc-note">Публичные книги открыты всем и без входа. Вход нужен для книг, которых нет в общем каталоге.</p>
     <button type="button" id="acc-signout" class="link-btn" hidden>Выйти</button>
+  </div>
+</div>
+
+<!-- Ключ OpenRouter живёт в этом браузере и никуда не уезжает: ни в репозиторий,
+     ни в резервную копию настроек. Поэтому вставлять его надо на каждом устройстве
+     отдельно, и поэтому же перевод через ИИ виден только тому, кто вставил ключ. -->
+<div id="mtset" class="overlay" hidden>
+  <div class="sheet">
+    <h2>Перевод через ИИ</h2>
+    <p class="about-line">Машинный перевод выделенного фрагмента. <b>Он не становится частью книги</b> — показывается отдельной карточкой и подписан как машинный.</p>
+
+    <label>Ключ OpenRouter
+      <input id="mt-key" type="password" placeholder="sk-or-v1-…" autocomplete="off" spellcheck="false">
+    </label>
+    <p class="about-line acc-note" id="mt-key-state"></p>
+    <div class="backup-row">
+      <button type="button" id="mt-key-save" class="primary">Сохранить ключ</button>
+      <button type="button" id="mt-key-clear">Удалить ключ</button>
+    </div>
+    <p class="about-line acc-note">Ключ хранится только в этом браузере (localStorage) и в резервную копию настроек не попадает. На другом устройстве его надо вставить заново. Заведите отдельный ключ с потолком трат — тогда даже при утечке потери ограничены.</p>
+
+    <label>Модель
+      <input id="mt-model" list="mt-model-list" placeholder="начните печатать: claude, gemini, gpt…" autocomplete="off" spellcheck="false">
+    </label>
+    <datalist id="mt-model-list"></datalist>
+    <p class="about-line acc-note" id="mt-model-state"></p>
+    <div id="mt-model-quick" class="chips"></div>
+    <div class="backup-row">
+      <button type="button" id="mt-model-reload">↻ Обновить список моделей</button>
+    </div>
+    <p class="about-line acc-note">Список берётся с самого OpenRouter, поэтому в нём всегда актуальные модели и цены (за миллион токенов). Платит владелец ключа — то есть вы.</p>
   </div>
 </div>
 
@@ -184,6 +216,14 @@
       <li><b>Две колонки</b> — ширина колонок и «RTL-язык справа».</li>
       <li><b>Порядок пары</b>, <b>выравнивание</b>, режим <b>сносок</b>.</li>
       <li><b>Экспорт/Импорт</b> — резервная копия настроек, пометок, вырезок и сборников в файл.</li>
+      <li><b>Перевод через ИИ</b> — свой ключ OpenRouter и выбор модели. Ключ живёт только в этом браузере: в резервную копию не попадает, на другом устройстве вставляется заново. Платит владелец ключа.</li>
+    </ul>
+
+    <h3 class="sheet-sub">Машинный перевод</h3>
+    <ul>
+      <li><b>Выделите текст</b> → «<b>⇄ Перевод</b>». Результат — карточкой поверх текста, движок переключается прямо в ней.</li>
+      <li><b>Быстро</b> — бесплатный словарный движок, без ключа. <b>ИИ</b> — связный перевод с учётом контекста, нужен ключ.</li>
+      <li>Машинный перевод <b>никогда не встаёт в текст книги</b> рядом с выверенным человеческим: на арабском Корана и хадисов машина регулярно ошибается в смысле, а на вид они неразличимы. В книгу его можно положить только кнопкой «<b>✎ В заметку</b>», и там он подписан как машинный.</li>
     </ul>
 
     <h3 class="sheet-sub">Пометки, вырезки, сборники</h3>

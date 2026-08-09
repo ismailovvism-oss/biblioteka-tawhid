@@ -24,6 +24,7 @@ const DEFAULTS = {
   last: {},            // bookId → { chapter, sector, page, ts }
   readDays: [],        // ['YYYY-MM-DD', …] — дни, когда что-то читали
   mtProvider: 'mymemory',  // последний выбранный движок машинного перевода
+  mtModel: '',             // модель OpenRouter (id из его каталога); ключ — НЕ здесь, см. translate.js
   marks: {},           // bookId → [пометка] — см. «пометки» ниже
   collections: [],     // сквозные тематические сборники из пометок
   // ↓ старые ключи: читаются один раз при миграции в marks и больше не пишутся
@@ -1221,7 +1222,7 @@ async function runTranslate(providerId) {
   $('#mt-card').hidden = false;
 
   try {
-    const r = await mtTranslate(text, from, to, providerId);
+    const r = await mtTranslate(text, from, to, providerId, { model: settings.mtModel });
     body.textContent = r.text;
     $('#mt-source').textContent =
       `${langName(from)} → ${langName(to)}${r.cached ? ' · из кэша' : ''}`;
@@ -1261,6 +1262,135 @@ bindClick('#mt-to-note', () => {
   closeMt();
   toast('Сохранено в пометки');
 });
+
+/* ===== настройка перевода через ИИ (ключ OpenRouter + модель) =====
+ * Ключ читателя, а не библиотеки: живёт в localStorage этого браузера, в экспорт
+ * настроек не попадает (см. translate.js). Модель выбирается из ЖИВОГО каталога
+ * OpenRouter — захардкоженный список моделей протухает к следующему их релизу.
+ */
+let mtModelCache = null;   // список моделей за сессию: каталог большой, тянуть его на каждое открытие незачем
+
+/* Список желаемых моделей — ИМЕННО перечислением, а не регуляркой по имени:
+   регулярка «любой anthropic/claude-opus» в алфавитном каталоге выберет
+   claude-opus-4 ($15/$75 за миллион) вместо свежего и втрое более дешёвого.
+   Список сверяется с живым каталогом: чего в нём нет — то и не предлагаем,
+   так что устаревшая строка отсюда молча пропускается, а не ломает выбор. */
+const MT_MODEL_PREF = [
+  'anthropic/claude-sonnet-5',      // рабочая лошадка: качество почти опусное, цена вчетверо ниже
+  'anthropic/claude-opus-5',        // когда важнее точность, чем цена
+  'google/gemini-3.1-pro-preview',
+  'anthropic/claude-haiku-4.5',     // быстро и дёшево
+  'google/gemini-3.6-flash',
+  'deepseek/deepseek-v3.2',         // самый дешёвый из вменяемых
+];
+
+function mtKeyStateText() {
+  const k = orKey();
+  return k
+    ? `Ключ сохранён (…${k.slice(-6)}). Перевод через ИИ доступен на этом устройстве.`
+    : 'Ключ не задан — в карточке перевода доступен только бесплатный движок.';
+}
+
+function renderMtKeyState() {
+  $('#mt-key-state').textContent = mtKeyStateText();
+  $('#mt-key').value = '';
+  $('#mt-key').placeholder = orKey() ? 'ключ сохранён — вставьте новый, чтобы заменить' : 'sk-or-v1-…';
+}
+
+function mtModelLabel(m) {
+  const price = m.outM ? ` · $${m.inM}/$${m.outM} за 1M` : ' · бесплатно';
+  return m.name + price;
+}
+
+function renderMtModelState() {
+  const cur = settings.mtModel;
+  const box = $('#mt-model-state');
+  if (!cur) { box.textContent = 'Модель не выбрана — перевод через ИИ не запустится.'; return; }
+  const known = mtModelCache && mtModelCache.find(m => m.id === cur);
+  box.textContent = known
+    ? `Переводит: ${mtModelLabel(known)}`
+    : `Переводит: ${cur}` + (mtModelCache ? ' — такой модели нет в каталоге OpenRouter, проверьте написание' : '');
+}
+
+function setMtModel(id) {
+  settings.mtModel = id.trim();
+  saveSettings();
+  $('#mt-model').value = settings.mtModel;
+  renderMtModelState();
+}
+
+/* Быстрый выбор строится из того же каталога: несколько знакомых имён, чтобы не
+   печатать id руками, но без вида «вот эти модели одобрены» — список открыт. */
+function renderMtQuick() {
+  const box = $('#mt-model-quick');
+  box.innerHTML = '';
+  if (!mtModelCache) return;
+  const picked = MT_MODEL_PREF.map(id => mtModelCache.find(x => x.id === id)).filter(Boolean);
+  for (const m of picked) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip' + (m.id === settings.mtModel ? ' on' : '');
+    b.textContent = m.name;
+    b.title = m.id + (m.outM ? ` — $${m.inM}/$${m.outM} за 1M токенов` : '');
+    b.addEventListener('click', () => { setMtModel(m.id); renderMtQuick(); });
+    box.appendChild(b);
+  }
+}
+
+async function loadMtModels(force) {
+  if (mtModelCache && !force) { renderMtQuick(); renderMtModelState(); return; }
+  const state = $('#mt-model-state');
+  state.textContent = 'Загружаю список моделей…';
+  try {
+    mtModelCache = await mtModels();
+  } catch (err) {
+    state.textContent = 'Список моделей не загрузился (' + err.message + '). Id модели можно вписать вручную.';
+    return;
+  }
+  const dl = $('#mt-model-list');
+  dl.innerHTML = '';
+  for (const m of mtModelCache) {
+    const o = document.createElement('option');
+    o.value = m.id;
+    o.label = mtModelLabel(m);
+    dl.appendChild(o);
+  }
+  // первый заход: подставить разумную модель, чтобы не заставлять выбирать вслепую
+  if (!settings.mtModel) {
+    const first = MT_MODEL_PREF.find(id => mtModelCache.some(x => x.id === id));
+    if (first) { settings.mtModel = first; saveSettings(); }
+  }
+  $('#mt-model').value = settings.mtModel;
+  renderMtQuick();
+  renderMtModelState();
+}
+
+function openMtSetup() {
+  $('#settings').hidden = true;
+  renderMtKeyState();
+  $('#mt-model').value = settings.mtModel;
+  openOverlay($('#mtset'));
+  loadMtModels(false);
+}
+
+bindClick('#btn-mtset', openMtSetup);
+bindClick('#mt-key-save', () => {
+  const v = $('#mt-key').value.trim();
+  if (!v) { toast('Поле пустое'); return; }
+  orKeySet(v);
+  renderMtKeyState();
+  toast('Ключ сохранён');
+});
+bindClick('#mt-key-clear', () => {
+  orKeySet('');
+  renderMtKeyState();
+  toast('Ключ удалён');
+});
+bindClick('#mt-model-reload', () => loadMtModels(true));
+if ($('#mt-model')) {
+  $('#mt-model').addEventListener('change', e => { setMtModel(e.target.value); renderMtQuick(); });
+}
+
 /* ===== ВЫРЕЗКИ: сквозной свод пометок по всем книгам =====
  * Полка отвечает на вопрос «что почитать», вырезки — на вопрос «что я об этом думал».
  * Поэтому это отдельный раздел, а не вкладка внутри книги: мысль по теме почти всегда

@@ -10,7 +10,7 @@
  * Версию бампать при изменении оболочки — старый кеш чистится на activate.
  */
 
-const VERSION = 'chitalka-v44';
+const VERSION = 'chitalka-v45';
 const SHELL = [
   './',
   'index.html',
@@ -45,7 +45,10 @@ self.addEventListener('activate', event => {
 const isFont = url => /(^|\.)(googleapis|gstatic)\.com$/.test(url.hostname);
 // бэкенд (аутентификация, реестр приватных книг, подписанные URL) — мимо кеша совсем:
 // приватный контент не должен оседать в кеше, иначе токен-гейт обходится через него
-const isBackend = url => /(^|\.)supabase\.(co|in)$/.test(url.hostname);
+// OpenRouter — тоже API, а не контент: каталог моделей и цены меняются, и держать
+// их в офлайн-кеше значит однажды показать выбор из моделей, которых уже нет
+const isBackend = url =>
+  /(^|\.)supabase\.(co|in)$/.test(url.hostname) || /(^|\.)openrouter\.ai$/.test(url.hostname);
 const cacheable = res => res && res.ok && (res.type === 'basic' || res.type === 'cors');
 
 async function cacheFirst(req) {

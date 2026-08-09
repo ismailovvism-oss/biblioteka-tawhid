@@ -10,16 +10,39 @@
  * `app.js` отдельной карточкой поверх текста, с явной подписью, и никогда не
  * подмешивает в поток секторов. Не менять это без веской причины.
  *
- * Два провайдера:
- *   mymemory — бесплатный, без ключа, CORS открыт → можно звать прямо из браузера.
- *              Лимит 500 БАЙТ на запрос, поэтому длинное режем по предложениям.
- *   claude   — через свою Edge Function (supabase/functions/translate). Ключ живёт
- *              в секретах функции: сайт статический и лежит на Pages, любой ключ
- *              в браузере утечёт в первый же день.
+ * Три провайдера:
+ *   mymemory   — бесплатный, без ключа, CORS открыт → можно звать прямо из браузера.
+ *                Лимит 500 БАЙТ на запрос, поэтому длинное режем по предложениям.
+ *   claude     — через свою Edge Function (supabase/functions/translate). Ключ живёт
+ *                в секретах функции: он общий, платит владелец библиотеки, поэтому
+ *                в браузер его класть нельзя — сайт статический и лежит на Pages.
+ *   openrouter — ключ ЧИТАТЕЛЯ, введённый в настройках и лежащий в localStorage
+ *                этого устройства. В репозиторий не попадает, платит сам читатель,
+ *                модель выбирает тоже он. CORS у OpenRouter открыт → зовём напрямую,
+ *                никакого сервера для этого пути не нужно.
+ *
+ * ⚠️ Почему свой ключ можно, а общий нельзя: разница не в технологии, а в том, чей
+ * это кошелёк. Ключ в localStorage виден любому скрипту на странице, поэтому в него
+ * годится только тот ключ, чьим риском распоряжается сам владелец ключа.
  */
 
 const MT_CACHE_PREFIX = 'chitalka:mt:';
 const MT_MAX_CACHE = 300;          // записей; переводы короткие, но копятся
+
+/* ключ OpenRouter — отдельный ключ localStorage, НЕ поле settings:
+   settings уходят в файл резервной копии (экспорт), а секрету там не место */
+const OR_KEY_STORE = 'chitalka:orkey';
+const OR_API = 'https://openrouter.ai/api/v1';
+
+function orKey() {
+  try { return localStorage.getItem(OR_KEY_STORE) || ''; } catch { return ''; }
+}
+function orKeySet(value) {
+  try {
+    if (value) localStorage.setItem(OR_KEY_STORE, value);
+    else localStorage.removeItem(OR_KEY_STORE);
+  } catch { /* приватный режим — ключ проживёт только до перезагрузки */ }
+}
 
 const MT_PROVIDERS = {
   mymemory: {
@@ -31,23 +54,30 @@ const MT_PROVIDERS = {
   },
   claude: {
     id: 'claude',
-    label: 'ИИ',
-    note: 'Claude — связный перевод с учётом контекста',
+    label: 'ИИ (сервер)',
+    note: 'Claude через Edge Function библиотеки',
     /* Развёрнута функция или нет, снаружи не видно — узнаём только по первому
        вызову. Поэтому сначала «доступен», а после отказа (нет функции / нет
        ключа) гасим на сессию: пусть лучше один раз честно скажет, чем каждый
        раз обещать и не мочь. */
     available: () => Boolean(window.SB && SB.configured()) && !mtClaudeDown,
   },
+  openrouter: {
+    id: 'openrouter',
+    label: 'ИИ (свой ключ)',
+    note: 'OpenRouter — ваш ключ и ваш выбор модели',
+    // ключ есть — путь готов; сервер тут ни при чём, значит и офлайна-угадайки нет
+    available: () => Boolean(orKey()),
+  },
 };
 let mtClaudeDown = false;   // выяснено на первом вызове: функции/ключа нет
 
 /* ── кэш ──────────────────────────────────────────────────────────────────── */
-function mtKey(text, from, to, provider) {
+function mtKey(text, from, to, tag) {
   // короткий стабильный хэш: ключ localStorage не должен тащить весь абзац
   let h = 2166136261;
   for (const ch of text) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
-  return `${MT_CACHE_PREFIX}${provider}:${from}-${to}:${(h >>> 0).toString(36)}:${text.length}`;
+  return `${MT_CACHE_PREFIX}${tag}:${from}-${to}:${(h >>> 0).toString(36)}:${text.length}`;
 }
 
 function mtCacheGet(key) {
@@ -151,12 +181,115 @@ async function mtViaClaude(text, from, to) {
   return data.text;
 }
 
+/* ── OpenRouter: ключ читателя, вызов прямо из браузера ───────────────────── */
+
+const MT_LANG_NAMES = {
+  ru: 'русский', en: 'английский', ar: 'арабский',
+  fa: 'фарси', tr: 'турецкий', de: 'немецкий', fr: 'французский',
+};
+const mtLangName = code => MT_LANG_NAMES[code] || code;
+
+/* Тот же самый промпт, что и в Edge Function: перевод, а не пересказ, и без
+   преамбулы — результат вставляется в карточку как есть. Отдельно про
+   религиозный текст: там буквальность важнее гладкости, а догадки недопустимы. */
+function mtSystemPrompt(from, to) {
+  return [
+    `Ты переводчик. Переведи текст с ${mtLangName(from)} на ${mtLangName(to)}.`,
+    'Верни ТОЛЬКО перевод: без преамбулы, без пояснений, без кавычек вокруг ответа.',
+    'Сохраняй абзацы, разметку и знаки препинания исходника.',
+    'Если текст религиозный (Коран, хадис, богословие) — переводи буквально и осторожно:',
+    'сохраняй устоявшиеся термины, не сглаживай и не додумывай смысл.',
+    'Имена собственные и термины, у которых нет принятого соответствия, оставляй как есть.',
+  ].join(' ');
+}
+
+/* Список моделей OpenRouter — публичный, без ключа. Нужен, чтобы выбор модели
+   был выбором из РЕАЛЬНОГО каталога, а не из захардкоженного списка, который
+   протухнет к следующему релизу моделей. */
+async function mtModels() {
+  const res = await fetch(OR_API + '/models');
+  if (!res.ok) throw new Error(`OpenRouter: HTTP ${res.status}`);
+  const data = await res.json();
+  const list = ((data && data.data) || []).filter(m => {
+    // `:batch` — тот же движок, но с отложенным ответом; в чат-эндпоинт такой
+    // id отправлять бессмысленно, а из автодополнения он выбирается на раз
+    if (/:batch$/.test(m.id)) return false;
+    const out = ((m.architecture || {}).output_modalities) || ['text'];
+    return out.includes('text');   // модели, рисующие картинки, переводить не станут
+  });
+  return list.map(m => ({
+    id: m.id,
+    name: m.name || m.id,
+    // цена приходит строкой «за токен»; переводим в доллары за миллион — так читаемо
+    inM: Math.round((Number((m.pricing || {}).prompt) || 0) * 1e6 * 100) / 100,
+    outM: Math.round((Number((m.pricing || {}).completion) || 0) * 1e6 * 100) / 100,
+  })).sort((a, b) => a.id.localeCompare(b.id));
+}
+
+async function mtViaOpenRouter(text, from, to, model) {
+  const key = orKey();
+  if (!key) throw new Error('Не задан ключ OpenRouter (настройки → «Перевод через ИИ»)');
+  if (!model) throw new Error('Не выбрана модель (настройки → «Перевод через ИИ»)');
+
+  let res;
+  try {
+    res = await fetch(OR_API + '/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + key,
+        'Content-Type': 'application/json',
+        /* необязательные поля атрибуции OpenRouter; в статистике видно, кто звал.
+           ⚠️ Только латиница: значение заголовка — ByteString, и кириллическое
+           название роняет сам fetch (TypeError) ещё до отправки — то есть перевод
+           не работал бы вообще и жаловался бы на «нет сети». */
+        'HTTP-Referer': location.origin,
+        'X-Title': 'Biblioteka Tawhid',
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 4000,
+        messages: [
+          { role: 'system', content: mtSystemPrompt(from, to) },
+          { role: 'user', content: text },
+        ],
+      }),
+    });
+  } catch {
+    // сюда же попадает офлайн: сеть для этого пути обязательна
+    throw new Error('OpenRouter недоступен — нет сети?');
+  }
+
+  const raw = await res.text();
+  let data = null;
+  try { data = raw ? JSON.parse(raw) : null; } catch { data = null; }
+  const errMsg = data && data.error && (data.error.message || data.error);
+
+  if (!res.ok) {
+    if (res.status === 401) throw new Error('OpenRouter не принял ключ — проверьте его в настройках');
+    if (res.status === 402) throw new Error('На счету OpenRouter кончились средства');
+    if (res.status === 429) throw new Error('OpenRouter: слишком часто, подождите немного');
+    throw new Error('OpenRouter: ' + (errMsg || `HTTP ${res.status}`));
+  }
+  // ошибку могут прислать и с кодом 200 — тело важнее статуса
+  if (errMsg) throw new Error('OpenRouter: ' + errMsg);
+
+  const msg = data && data.choices && data.choices[0] && data.choices[0].message;
+  const out = msg && (typeof msg.content === 'string'
+    ? msg.content
+    : Array.isArray(msg.content)
+      ? msg.content.map(p => (p && p.text) || '').join('')
+      : '');
+  if (!out || !out.trim()) throw new Error('OpenRouter вернул пустой перевод');
+  return out.trim();
+}
+
 /* ── публичная точка входа ────────────────────────────────────────────────── */
 /**
  * Перевести фрагмент. Возвращает { text, provider, cached }.
+ * `opts.model` нужен только провайдеру openrouter.
  * Ошибки пробрасываются — показывает их вызывающая сторона.
  */
-async function mtTranslate(text, from, to, providerId) {
+async function mtTranslate(text, from, to, providerId, opts) {
   const src = String(text || '').trim();
   if (!src) throw new Error('Нечего переводить');
   if (from === to) throw new Error('Исходный и целевой язык совпадают');
@@ -164,12 +297,14 @@ async function mtTranslate(text, from, to, providerId) {
   if (!provider) throw new Error('Неизвестный провайдер перевода');
   if (!provider.available()) throw new Error(`«${provider.label}» сейчас недоступен`);
 
-  const key = mtKey(src, from, to, providerId);
+  const model = (opts && opts.model) || '';
+  // модель — часть ключа кэша: один и тот же фрагмент у разных моделей переводится по-разному
+  const key = mtKey(src, from, to, providerId === 'openrouter' ? 'or/' + model : providerId);
   const hit = mtCacheGet(key);
   if (hit) return { text: hit, provider, cached: true };
 
-  const out = providerId === 'claude'
-    ? await mtViaClaude(src, from, to)
+  const out = providerId === 'openrouter' ? await mtViaOpenRouter(src, from, to, model)
+    : providerId === 'claude' ? await mtViaClaude(src, from, to)
     : await mtViaMyMemory(src, from, to);
 
   mtCacheSet(key, out);
