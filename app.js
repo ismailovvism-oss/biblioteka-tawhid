@@ -1504,6 +1504,14 @@ stream.addEventListener('click', e => {
 // перерисовка нужна ради подсветки выбранного: сам выбор уже сохранён в settings
 function refreshMtselPrompts() { renderPromptChips($('#mtsel-prompts'), refreshMtselPrompts); }
 
+/* Пояс и подтяжки к `user-select: none`. В большинстве браузеров хватает и одного
+   CSS, но в части webview (и в Firefox на Android) долгий тап всё равно запускает
+   выделение и системное меню поверх нашей панели. Отменяем оба события в зародыше —
+   и только в режиме перевода, чтобы обычное чтение с копированием не сломать. */
+['selectstart', 'contextmenu'].forEach(ev => {
+  stream.addEventListener(ev, e => { if (mtModeOn()) e.preventDefault(); });
+});
+
 function setMtMode(on) {
   if (on && !book) { toast('Сначала откройте книгу'); return; }
   if (on) document.body.dataset.mtmode = '1';
