@@ -3366,7 +3366,6 @@ function renderLibrary() {
   // навигация по подкатегориям — в боковом дереве (#cat-tree); фасеты — в нижней
   // панели фильтров (#filter-sheet). На основном экране остаётся только крошка.
   stream.appendChild(panel);
-  updateFilterBadge();
 
   // переключатель видов (запоминается в settings.shelfView)
   const view = ['covers', 'spines', 'list'].includes(settings.shelfView) ? settings.shelfView : (settings.shelfView = 'covers');
@@ -3403,11 +3402,22 @@ function renderLibrary() {
     sw.appendChild(b);
   }
 
+  /* Фильтры — кнопкой прямо в панели полки, с подписью и счётчиком. В шапке
+     она была глифом ⛃ среди десятка иконок: не видно и непонятно, для чего. */
+  const filt = document.createElement('button');
+  filt.type = 'button';
+  filt.id = 'btn-filter';
+  filt.className = 'shelf-filter';
+  filt.title = 'Отбор по признакам: одобрение, готовность, язык, автор, тема';
+  filt.innerHTML = '⛃ Фильтры<span id="filter-count" class="filter-badge" hidden></span>';
+  filt.addEventListener('click', () => { renderFilterSheet(); openOverlay($('#filter-sheet')); });
+
   const count = document.createElement('span');
   count.className = 'shelf-count';
 
-  bar.append(q, sort, sw, count);
+  bar.append(q, sort, sw, filt, count);
   stream.appendChild(bar);
+  updateFilterBadge();
 
   const body = document.createElement('div');
   body.className = 'shelf-body';
@@ -3641,7 +3651,6 @@ $('#btn-home').addEventListener('click', () => {
 });
 $('#btn-cattree').addEventListener('click', openTree);
 $('#tree-backdrop').addEventListener('click', closeTree);
-$('#btn-filter').addEventListener('click', () => { renderFilterSheet(); openOverlay($('#filter-sheet')); });
 $('#filter-apply').addEventListener('click', () => { $('#filter-sheet').hidden = true; });
 $('#filter-reset').addEventListener('click', () => {
   settings.shelfFacets = {}; saveSettings();
