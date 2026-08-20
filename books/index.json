@@ -74,10 +74,38 @@
         "маджлис"
       ],
       "authors": [
-        "Alqasawi"
+        "Исмаил Абу Хаммад"
       ],
       "progress": "wip",
       "review": "approved"
+    },
+    {
+      "id": "libas",
+      "base": "books/libas/",
+      "title": {
+        "ru": "Цвета одежды в шариате"
+      },
+      "category": "fiqh-adab",
+      "review": "approved",
+      "progress": "ready",
+      "genre": [
+        "Исследование"
+      ],
+      "authors": [
+        "Исмаил Абу Хаммад"
+      ],
+      "langs": [
+        "ru"
+      ],
+      "tags": [
+        "одежда",
+        "адаб",
+        "украшения",
+        "цвета",
+        "мазхабы"
+      ],
+      "cover": "books/libas/cover.jpg",
+      "era": "Современность"
     }
   ]
 }
