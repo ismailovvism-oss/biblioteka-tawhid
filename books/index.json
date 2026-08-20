@@ -2,40 +2,6 @@
   "title": "Библиотека Таухид",
   "books": [
     {
-      "id": "_sample",
-      "base": "books/_sample/",
-      "title": {
-        "ar": "كتاب تجريبي",
-        "ru": "Тестовая мини-книга"
-      },
-      "category": "misc",
-      "progress": "wip",
-      "langs": [
-        "ar",
-        "ru"
-      ],
-      "tags": [
-        "образец"
-      ]
-    },
-    {
-      "id": "_sample-en",
-      "base": "books/_sample-en/",
-      "title": {
-        "en": "English Sample Book",
-        "ru": "Английская мини-книга"
-      },
-      "category": "misc",
-      "review": "caution",
-      "langs": [
-        "en",
-        "ru"
-      ],
-      "tags": [
-        "образец"
-      ]
-    },
-    {
       "id": "tawfiq",
       "base": "books/tawfiq/",
       "title": {
