@@ -10,13 +10,14 @@
  * Версию бампать при изменении оболочки — старый кеш чистится на activate.
  */
 
-const VERSION = 'chitalka-v53';
+const VERSION = 'chitalka-v58';
 const SHELL = [
   './',
   'index.html',
   'style.css',
   'parser.js',
   'translate.js',
+  'gloss.js',
   'app.js',
   'supabase/config.js',
   'supabase/client.js',
@@ -66,7 +67,14 @@ async function networkFirst(req) {
   // по записи на каждый URL с query
   const key = req.mode === 'navigate' ? 'index.html' : req;
   try {
-    const res = await fetch(req);
+    /* `cache: 'no-cache'` — не отключение кеша, а требование ПЕРЕСПРОСИТЬ сервер
+       (условный запрос, обычно 304 и никакого трафика).
+       Без него «network-first» на деле оказывается «http-cache-first»: локальный
+       `python -m http.server` не шлёт Cache-Control, браузер применяет эвристику
+       и молча отдаёт старую копию, минуя сеть. Поймано на живом примере — книга
+       получила слой подстрочника, а приложение месяцами видело бы book.json без
+       него и просто не показывало функцию, без единой ошибки. */
+    const res = await fetch(new Request(req, { cache: 'no-cache' }));
     if (cacheable(res)) cache.put(key, res.clone());
     return res;
   } catch (err) {

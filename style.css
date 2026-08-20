@@ -434,6 +434,97 @@ body[data-layout="h"][data-colrtl] .pair > .member[dir="rtl"] {
 .font-group label { margin: 0.45rem 0; }
 .font-size-val { color: var(--muted); font-size: 0.85rem; min-width: 3ch; text-align: end; }
 
+/* ===== ПОДСТРОЧНИК: перевод под словом ======================================
+ * Глоссу рисует ПСЕВДОЭЛЕМЕНТ из data-g, а не <ruby><rt> — и это не украшение,
+ * а условие совместимости: содержимое ::after не входит в textContent. От
+ * textContent члена пары считаются смещения пометок (highlightRange), выделение
+ * в режиме перевода (caretOffset/wordAt) и поиск по книге; глосса внутри <ruby>
+ * влила бы туда русские слова и сдвинула бы всё сразу — включая то, что
+ * попадает в буфер при копировании абзаца. См. шапку gloss.js.
+ *
+ * inline-grid, а не inline-block: базовая линия inline-grid берётся от ПЕРВОГО
+ * ряда, то есть от самого слова, и строка текста не пляшет. У inline-block она
+ * взялась бы от последней строки — то есть от глоссы, и слово уехало бы вверх.
+ * Заодно ширина ячейки = max(слово, глосса), поэтому подписи соседних слов не
+ * наезжают друг на друга без единой абсолютной координаты.
+ */
+.gl[data-g] {
+  display: inline-grid;
+  grid-template-rows: auto auto;
+  /* слово по центру своей подписи: когда глосса шире слова, ячейка всё равно
+     раздвигается, и при выключке влево вся дыра собиралась справа от слова —
+     строка выглядела рваной. По центру просвет делится на две стороны и читается
+     как разрядка, а не как пропущенное слово. */
+  justify-items: center;
+  /* интерлиньяж абзаца (до 2.6 в настройках) относится к целой строке, а не к
+     слову: унаследованный, он отбивал подпись далеко вниз, и связь с её словом
+     терялась. Ряду со словом хватает собственной высоты. */
+  line-height: 1.1;
+}
+.gl[data-g]::after {
+  content: attr(data-g);
+  grid-row: 2;
+  font-family: "PT Sans", system-ui, sans-serif;
+  font-size: var(--gl-size, 0.62em);
+  line-height: 1.15;
+  color: var(--muted);
+  opacity: var(--gl-dim, 0.62);
+  letter-spacing: 0.01em;
+  /* Длинная глосса не должна растаскивать абзац: хвост срезаем, полный текст
+     всё равно показывает плашка по тапу. */
+  max-width: 14em;
+  padding-inline-end: 0.25em;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+#btn-gloss.on { color: var(--accent); }
+
+/* Сектор, который человек не выверял. Пунктиром под каждой подписью тут не обойтись:
+   пока не выверено ничего, это пунктир на всей странице, то есть шум, который
+   перестают замечать за минуту. Гарантию для тафсира даёт переключатель «только
+   выверенное» — он просто не рисует подписи; а грань нужна, чтобы читатель понял,
+   что здесь подписи СКРЫТЫ, а не отсутствуют. */
+body[data-gloss][data-gloss-ok] .pair.gl-unverified {
+  border-inline-start: 2px dashed var(--border);
+  padding-inline-start: 0.6rem;
+}
+
+/* плашка по тапу: полный перевод — в строке длинная глосса срезается многоточием,
+   и без плашки прочитать её было бы негде. */
+#gl-pop {
+  position: absolute;
+  z-index: 36;
+  max-width: min(20rem, 90vw);
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  font-size: 0.9rem;
+}
+.gl-pop-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.4rem; }
+#gl-pop-gloss { color: var(--muted); }
+.gl-pop-actions { display: flex; gap: 0.4rem; margin-top: 0.5rem; }
+.gl-pop-actions button {
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--accent);
+}
+
+/* пояснения и ряды кнопок внутри блоков настроек */
+.set-hint { margin: 0.5rem 0 0; color: var(--muted); font-size: 0.85rem; }
+.set-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.5rem; }
+.set-actions button {
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--accent);
+  font-size: 0.9rem;
+}
+.set-actions button:disabled { color: var(--muted); }
+
 .sheet-sub { margin: 0.8rem 0 0.3rem; color: var(--muted); font-size: 0.8rem; font-weight: normal; letter-spacing: 0.03em; text-transform: uppercase; }
 #bm-list { margin: 0; padding: 0; list-style: none; }
 .bm-item { display: flex; align-items: center; gap: 0.3rem; border-bottom: 1px solid var(--border); }
@@ -507,6 +598,7 @@ body[data-view="library"] #btn-home,
 body[data-view="library"] #btn-toc,
 body[data-view="library"] #btn-bookmark,
 body[data-view="library"] #btn-mtmode,
+body[data-view="library"] #btn-gloss,
 body[data-view="library"] #btn-vis,
 body[data-view="library"] #btn-warn,
 body[data-view="library"] #bottombar { display: none !important; }

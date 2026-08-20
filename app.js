@@ -27,6 +27,11 @@ const DEFAULTS = {
   mtModel: '',             // модель OpenRouter (id из его каталога); ключ — НЕ здесь, см. translate.js
   mtPrompt: 'plain',       // выбранный промпт перевода (id встроенного или своего)
   mtPrompts: [],           // свои промпты: [{ id, label, text }]
+  /* подстрочник (gloss.js): только вид и отбор. Сами подписи приходят вместе с
+     книгой (SPEC 3.4c), в настройках их нет и быть не должно — это содержимое.
+     func — рисовать ли служебные слова (в данных они есть всегда);
+     onlyVerified — не рисовать секторы, которых человек не выверял. */
+  gloss: { on: false, size: 0.62, dim: 0.62, func: false, onlyVerified: false },
   marks: {},           // bookId → [пометка] — см. «пометки» ниже
   collections: [],     // сквозные тематические сборники из пометок
   // ↓ старые ключи: читаются один раз при миграции в marks и больше не пишутся
@@ -94,6 +99,11 @@ function saveSettings() {
 }
 
 const settings = loadSettings();
+
+/* loadSettings склеивает поверхностно, поэтому вложенные ветки достраиваем руками.
+   Заодно это рвёт общую ссылку с DEFAULTS: без копии правка настроек меняла бы
+   сам DEFAULTS, и «сбросить» возвращал бы уже испорченное значение. */
+settings.gloss = Object.assign({}, DEFAULTS.gloss, settings.gloss || {});
 
 /* Миграция старых ключей в `marks`. Выполняется один раз и НЕ трогает исходные
    массивы, пока не сложит всё новое: если что-то пойдёт не так, прежние закладки
@@ -251,6 +261,7 @@ async function loadChapter(i, targetId) {
   $('#chapter-title').textContent = pickTitle(book.chapters[i].title);
   if (warnings.length) console.warn(`Контракт, ${book.chapters[i].file}:`, warnings);
   renderChapter();
+  ensureGlossChapter();   // фоном: подписи лягут на уже отрисованный текст
   // выделение режима перевода указывало в прежнюю главу — её узлов больше нет
   if (typeof clearMtSel === 'function') clearMtSel();
   renderDebug();
@@ -342,6 +353,7 @@ function renderChapter() {
   }
   applyVisibility();
   applyMarks();
+  applyGloss();   // подстрочник кладётся последним — поверх уже покрашенных пометок
 }
 
 /* ===== видимость языков: both → <orig> → <trans> → quiz:<orig> → quiz:<trans> ===== */
@@ -462,6 +474,10 @@ function findPairElBack(el) {
 }
 
 stream.addEventListener('click', e => {
+  // подписанное слово: показать, что за лемма, и дать убрать её из роя.
+  // Проверяем первым — обёртка слова лежит глубже подкраски пометки
+  const gw = e.target.closest('span.gl');
+  if (gw && window.getSelection().isCollapsed) { openGlossPop(gw); return; }
   const ref = e.target.closest('.fnref');
   if (ref) {
     const block = ref.closest('.pair, .fn-inline');
@@ -758,8 +774,12 @@ function applyMarks() {
 
 // перерисовать подкраску целиком: проще и надёжнее точечной вставки поверх пересечений
 function repaintMarks() {
+  // подстрочник снимаем ПЕРЕД перекраской: его обёртки слов режут диапазон
+  // выделения на куски, и цельным <mark> он бы уже не обернулся
+  stream.querySelectorAll('.member').forEach(m => glClear(m));
   stream.querySelectorAll('mark.hl').forEach(unwrap);
   applyMarks();
+  applyGloss();
 }
 
 /* ===== пометки: создание и правка ===== */
@@ -1469,7 +1489,7 @@ function wordAt(text, pos) {
    фразе пересечь <b> или ссылку на сноску — а невидимое выделение хуже, чем
    никакого. Здесь каждый кусок оборачивается в своём узле, так что пересечения
    разметки не мешают. */
-function paintParts(root, start, end, cls) {
+function paintParts(root, start, end, cls, data) {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const jobs = [];
   let pos = 0, n;
@@ -1480,6 +1500,7 @@ function paintParts(root, start, end, cls) {
     pos += len;
     if (pos >= end) break;
   }
+  let painted = 0;
   for (const j of jobs) {
     try {
       const r = document.createRange();
@@ -1487,9 +1508,12 @@ function paintParts(root, start, end, cls) {
       r.setEnd(j.node, j.e);
       const mark = document.createElement('mark');
       mark.className = cls;
+      if (data) Object.assign(mark.dataset, data);
       r.surroundContents(mark);
+      painted++;
     } catch { /* кусок не обернулся — остальные всё равно покрасим */ }
   }
+  return painted;
 }
 
 function paintMtSel() {
@@ -1615,6 +1639,222 @@ bindClick('#mtsel-go', () => {
   };
   runTranslate(mtProvider());
 });
+
+/* ===== ПОДСТРОЧНИК: перевод под словом =====
+ * Механика — в gloss.js, формат — SPEC 3.4c. Глоссы приходят ВМЕСТЕ С КНИГОЙ
+ * (`<книга>/gloss/<язык>/<глава>.md`), а не из встроенного словаря: словарь давал
+ * перевод леммы, слепой к предложению, и на омонимах врал (см. шапку gloss.js).
+ * Здесь только то, что знает про приложение: кнопка, настройки и наложение на
+ * текущую главу.
+ */
+
+// языки книги, у которых есть слой подстрочника (book.json → "gloss": ["en"])
+function glossLangs() {
+  if (!book || !Array.isArray(book.gloss)) return [];
+  return book.gloss.filter(l => book.languages.includes(l));
+}
+
+const glossKey = (lang, file) => `${bookId}/${lang}/${file}`;
+const chapterFile = () => (book && book.chapters[chapterIndex] && book.chapters[chapterIndex].file) || '';
+
+/* Подстрочник текущей главы. Грузится фоном: глава не должна его ждать, а когда
+   файл приедет, подписи лягут на уже отрисованный текст. */
+async function ensureGlossChapter() {
+  const file = chapterFile();
+  const langs = glossLangs();
+  if (!file || !langs.length) { updateGlossBtn(); return; }
+  await Promise.all(langs.map(l =>
+    glLoadChapter(glossKey(l, file), `${base}gloss/${l}/${file}`, fetchBookText)));
+  if (settings.gloss.on) applyGloss();
+  updateGlossBtn();
+  setupGlossSettings();
+}
+
+// подписи есть, если хоть у одного языка главы разобрался непустой файл
+function glossReady() {
+  const file = chapterFile();
+  return glossLangs().some(l => {
+    const m = glChapter(glossKey(l, file));
+    return m && m.size > 0;
+  });
+}
+
+function updateGlossBtn() {
+  const btn = $('#btn-gloss');
+  if (!btn) return;
+  btn.hidden = !glossLangs().length;
+  btn.classList.toggle('on', !!settings.gloss.on);
+}
+
+// кегль и приглушённость — чистый CSS, перекладывать текст ради них незачем
+function applyGlossStyle() {
+  document.body.style.setProperty('--gl-size', settings.gloss.size + 'em');
+  document.body.style.setProperty('--gl-dim', String(settings.gloss.dim));
+}
+
+function applyGloss() {
+  const g = settings.gloss;
+  document.body.toggleAttribute('data-gloss', !!g.on);
+  // отметка «здесь подписи скрыты, а не отсутствуют» — нужна только когда отбор включён
+  document.body.toggleAttribute('data-gloss-ok', !!(g.on && g.onlyVerified));
+  applyGlossStyle();
+  stream.querySelectorAll('.member').forEach(m => glClear(m));
+  if (g.on && book) {
+    const file = chapterFile();
+    for (const lang of glossLangs()) {
+      const sectors = glChapter(glossKey(lang, file));
+      if (!sectors) continue;
+      for (const el of stream.querySelectorAll('.pair')) {
+        const sec = sectors.get(el.dataset.id);
+        if (!sec) continue;
+        /* Выверенность — на секторе. «Только выверенное» просто не рисует
+           неподтверждённое: для тафсира гарантию даёт это, а не оформление.
+           Пунктиром тут не обойтись — пока не выверено ничего, пунктир под каждой
+           подписью это пунктир на всей странице, то есть шум. */
+        el.classList.toggle('gl-unverified', !sec.verified);
+        if (g.onlyVerified && !sec.verified) continue;
+        const mem = el.querySelector('.member.lang-' + lang);
+        if (mem) glApplyEntries(mem, sec.entries, { showFunction: g.func });
+      }
+    }
+  }
+  closeGlossPop();
+  updateGlossBtn();
+}
+
+function setGlossMode(on) {
+  if (on && !glossLangs().length) {
+    toast(book ? 'У этой книги нет слоя подстрочника' : 'Сначала откройте книгу');
+    return;
+  }
+  settings.gloss.on = !!on;
+  saveSettings();
+  applyGloss();
+  setupGlossSettings();
+  if (on && !glossReady()) toast('У этой главы подписи ещё не подготовлены');
+}
+
+bindClick('#btn-gloss', () => setGlossMode(!settings.gloss.on));
+
+/* Тап по подписанному слову: показать перевод целиком. В строке длинная глосса
+   срезается многоточием, и без этого её было бы не прочитать вовсе. */
+let glPop = null;
+
+function openGlossPop(span) {
+  const pop = $('#gl-pop');
+  glPop = { n: span.dataset.n };
+  $('#gl-pop-word').textContent = span.textContent;
+  $('#gl-pop-gloss').textContent = span.dataset.g;
+  pop.hidden = false;
+  // измерять можно только показанным: у скрытого нет ни ширины, ни высоты
+  const r = span.getBoundingClientRect();
+  const w = pop.offsetWidth, h = pop.offsetHeight;
+  const left = Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2));
+  const below = r.bottom + 8 + h < window.innerHeight;
+  pop.style.left = (left + window.scrollX) + 'px';
+  pop.style.top = ((below ? r.bottom + 8 : Math.max(8, r.top - h - 8)) + window.scrollY) + 'px';
+}
+
+function closeGlossPop() {
+  const pop = $('#gl-pop');
+  if (pop) pop.hidden = true;
+  glPop = null;
+}
+
+bindClick('#gl-pop-close', closeGlossPop);
+document.addEventListener('click', e => {
+  if (glPop && !e.target.closest('#gl-pop') && !e.target.closest('span.gl')) closeGlossPop();
+});
+
+/* ── настройки подстрочника ──────────────────────────────────────────────── */
+
+function setupGlossSettings() {
+  const wrap = $('#set-gloss');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+
+  const group = document.createElement('div');
+  group.className = 'font-group';
+  const head = document.createElement('div');
+  head.className = 'font-lang';
+  head.textContent = 'Подстрочник';
+  group.appendChild(head);
+
+  const langs = glossLangs();
+  if (!book || !langs.length) {
+    const hint = document.createElement('p');
+    hint.className = 'set-hint';
+    hint.textContent = book
+      ? 'У этой книги нет слоя подстрочника: подписи поставляются вместе с книгой.'
+      : 'Откройте книгу — подстрочник зависит от её содержимого.';
+    group.appendChild(hint);
+    wrap.appendChild(group);
+    return;
+  }
+
+  const on = document.createElement('label');
+  on.className = 'row';
+  on.append('Показывать перевод под словом');
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.checked = !!settings.gloss.on;
+  cb.addEventListener('change', () => setGlossMode(cb.checked));
+  on.appendChild(cb);
+  group.appendChild(on);
+
+  const func = document.createElement('label');
+  func.className = 'row';
+  func.append('Подписывать служебные слова');
+  const fcb = document.createElement('input');
+  fcb.type = 'checkbox';
+  fcb.checked = !!settings.gloss.func;
+  fcb.addEventListener('change', () => {
+    settings.gloss.func = fcb.checked;
+    saveSettings();
+    applyGloss();
+  });
+  func.appendChild(fcb);
+  group.appendChild(func);
+
+  const ver = document.createElement('label');
+  ver.className = 'row';
+  ver.append('Только выверенное человеком');
+  const vcb = document.createElement('input');
+  vcb.type = 'checkbox';
+  vcb.checked = !!settings.gloss.onlyVerified;
+  vcb.addEventListener('change', () => {
+    settings.gloss.onlyVerified = vcb.checked;
+    saveSettings();
+    applyGloss();
+    setupGlossSettings();
+  });
+  ver.appendChild(vcb);
+  group.appendChild(ver);
+
+  group.appendChild(makeSlider('Кегль перевода', settings.gloss.size, 0.45, 0.9, 0.01,
+    v => Math.round(v * 100) + '%',
+    v => { settings.gloss.size = v; applyGlossStyle(); }));
+  group.appendChild(makeSlider('Приглушённость', settings.gloss.dim, 0.25, 1, 0.05,
+    v => Math.round(v * 100) + '%',
+    v => { settings.gloss.dim = v; applyGlossStyle(); }));
+
+  const info = document.createElement('p');
+  info.className = 'set-hint';
+  const file = chapterFile();
+  const counts = langs.map(l => {
+    const m = glChapter(glossKey(l, file));
+    if (!m) return `${langName(l)}: нет`;
+    let ok = 0;
+    for (const sec of m.values()) if (sec.verified) ok++;
+    return `${langName(l)}: ${m.size} секторов, выверено ${ok}`;
+  });
+  info.textContent = glossReady()
+    ? `В этой главе — ${counts.join('; ')}.`
+    : 'В этой главе подписей пока нет — подготовьте их генератором (tools/gloss-book.js).';
+  group.appendChild(info);
+
+  wrap.appendChild(group);
+}
 
 /* ===== настройка перевода через ИИ (ключ OpenRouter + модель) =====
  * Ключ читателя, а не библиотеки: живёт в localStorage этого браузера, в экспорт
@@ -2702,7 +2942,11 @@ function highlightRange(root, start, end, cls = 'search-hit', data) {
     range.surroundContents(mark); // бросает, если диапазон пересекает границы элементов
     return true;
   } catch {
-    return false; // диапазон пересекает разметку (напр. сноску) — пропускаем
+    /* Диапазон пересёк границу разметки — сноску, <b> или обёртку слова
+       подстрочника. Раньше здесь было `return false`, то есть выделение молча
+       не рисовалось вовсе; невидимая пометка хуже, чем нарисованная кусками,
+       поэтому падаем в покраску по кускам текстовых узлов. */
+    return paintParts(root, start, end, cls, data) > 0;
   }
 }
 
@@ -3599,6 +3843,7 @@ async function openBook(entry, opts = {}) {
   ensureFontDefaults();
   applyFonts();
   setupFontSettings();
+  glForget();          // подстрочник прошлой книги к этой отношения не имеет
   document.title = pickTitle(book.title);
   buildToc();
   buildMarkPanel();

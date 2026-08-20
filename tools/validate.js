@@ -9,7 +9,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { buildChapter } = require(path.join(__dirname, '..', 'parser.js'));
+const { buildChapter, glossTokens, glossHash, parseGlossFile } = require(path.join(__dirname, '..', 'parser.js'));
 
 const dir = process.argv[2];
 if (!dir) {
@@ -21,6 +21,8 @@ const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'book.json'), 'utf8')
 console.log(`Книга: ${manifest.bookId} — ${manifest.title[manifest.languages[1]] || manifest.title[manifest.languages[0]] || ''}`);
 
 let total = 0;
+const glossDone = [];      // что реально подписано
+const glossPending = [];   // объявлен слой подстрочника, а файла главы ещё нет
 for (const ch of manifest.chapters) {
   // запись-группа (header) — заголовок без файла, читать нечего
   if (!ch.file) continue;
@@ -51,6 +53,61 @@ for (const ch of manifest.chapters) {
       warnings.push(`картинка не найдена: ${src} (ищем в ${path.join(dir, src)})`);
     }
   }
+  /* Подстрочник (SPEC 3.4c): номер в gloss-файле — порядковый номер слова в секторе.
+     Разойдись он с текстом хоть на единицу, и подпись встанет под чужим словом —
+     а читатель примет её за перевод и подмены не заметит. Поэтому сверяем каждую
+     запись со словом, которое реально стоит под этим номером, и роняем сборку. */
+  for (const gl of (Array.isArray(manifest.gloss) ? manifest.gloss : [])) {
+    const gp = path.join(dir, 'gloss', gl, ch.file);
+    if (!fs.existsSync(gp)) { glossPending.push(`${gl}/${ch.file}`); continue; }
+    const { sectors, warnings: gw } = parseGlossFile(fs.readFileSync(gp, 'utf8'));
+    gw.forEach(w => warnings.push(`подстрочник ${gl}/${ch.file}: ${w}`));
+    const byId = new Map(pairs.filter(p => p.type === 'text').map(p => [p.id, p]));
+    const tag = `подстрочник ${gl}/${ch.file}`;
+    let placed = 0, verified = 0, stale = 0;
+    for (const [id, sec] of sectors) {
+      const pair = byId.get(id);
+      if (!pair) { warnings.push(`${tag}: сектора ${id} нет в главе`); continue; }
+      if (!pair[gl]) { warnings.push(`${tag}: у сектора ${id} нет текста на ${gl}`); continue; }
+      const toks = glossTokens(pair[gl]);
+      const nums = new Set(sec.entries.map(e => e.n));
+      if (sec.verified) verified++;
+
+      /* Хеш протух — текст сектора правили после генерации. Это не ошибка Контракта:
+         подписи, чьё слово ещё совпадает, останутся верны. Но перегенерировать надо,
+         и молчать об этом нельзя. */
+      if (sec.hash && sec.hash !== glossHash(pair[gl])) {
+        warnings.push(`${tag}: ${id} — текст изменился после генерации, подписи протухли`);
+        stale++;
+      }
+
+      for (const e of sec.entries) {
+        const tok = toks[e.n - 1];
+        if (!tok) {
+          warnings.push(`${tag}: ${id}, слово ${e.n} — в секторе всего ${toks.length} слов`);
+          continue;
+        }
+        if (tok.word.toLowerCase() !== e.word.toLowerCase()) {
+          warnings.push(`${tag}: ${id}, слово ${e.n} — в тексте «${tok.word}», в подстрочнике «${e.word}»`);
+          continue;
+        }
+        // стрелка «->N» обязана вести на существующее слово того же сектора,
+        // и у носителя должна быть своя подпись — иначе смысл не несёт никто
+        if (e.carrier != null) {
+          const host = sec.entries.find(x => x.n === e.carrier);
+          if (!nums.has(e.carrier)) {
+            warnings.push(`${tag}: ${id}, слово ${e.n} ссылается на ${e.carrier}, а такой строки нет`);
+          } else if (!host.gloss) {
+            warnings.push(`${tag}: ${id}, слово ${e.n} ссылается на ${e.carrier}, у которого подписи тоже нет`);
+          }
+          continue;
+        }
+        placed++;
+      }
+    }
+    glossDone.push(`${gl}: ${sectors.size} секторов (выверено ${verified}${stale ? `, протухло ${stale}` : ''}) / ${placed} подписей`);
+  }
+
   const only = missing.length
     ? `, только ${manifest.languages.filter(l => !missing.includes(l)).join('+') || '—'}`
     : '';
@@ -63,5 +120,8 @@ for (const ch of manifest.chapters) {
   }
 }
 
+if (glossDone.length) console.log(`  подстрочник — ${glossDone.join('; ')}`);
+// Отсутствие файла главы не ошибка: подписи готовятся постепенно, глава за главой.
+if (glossPending.length) console.log(`  подстрочник не готов: ${glossPending.join(', ')}`);
 console.log(total ? `\nОшибок контракта: ${total}` : '\nКонтракт соблюдён ✓');
 process.exit(total ? 1 : 0);

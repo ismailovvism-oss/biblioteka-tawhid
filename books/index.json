@@ -70,6 +70,24 @@
       ],
       "cover": "books/libas/cover.jpg",
       "era": "Современность"
+    },
+    {
+      "id": "_sample-en",
+      "base": "books/_sample-en/",
+      "title": {
+        "en": "English Sample Book",
+        "ru": "Английская мини-книга"
+      },
+      "category": "misc",
+      "progress": "wip",
+      "langs": [
+        "en",
+        "ru"
+      ],
+      "tags": [
+        "образец формата",
+        "тест"
+      ]
     }
   ]
 }
