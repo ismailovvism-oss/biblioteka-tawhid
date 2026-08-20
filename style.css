@@ -953,7 +953,8 @@ mark.hl.has-note { box-shadow: inset 0 -0.14em 0 var(--accent); }
 .review-wip, .review-ready { left: auto; right: 4px; }
 .review-wip   { background: #6f6f68; }
 .review-ready { background: #3f8f54; }
-.bookinfo-cover .review-badge { font-size: 0.74rem; }
+.bookinfo-status { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0.1rem 0 0.55rem; }
+.bookinfo-status .review-badge { position: static; font-size: 0.74rem; }
 
 /* карточка книги */
 .bookinfo-back {
@@ -979,8 +980,10 @@ mark.hl.has-note { box-shadow: inset 0 -0.14em 0 var(--accent); }
   flex-wrap: wrap;
 }
 .bookinfo-cover {
-  flex: 0 0 160px;
-  max-width: 160px;
+  /* Телефон: места хватает на обложку во весь блок — 160px тут мелочь. */
+  flex: 0 0 min(62vw, 300px);
+  max-width: min(62vw, 300px);
+  margin-inline: auto;
   aspect-ratio: 5 / 7.4;
   cursor: default;
 }
@@ -988,7 +991,7 @@ mark.hl.has-note { box-shadow: inset 0 -0.14em 0 var(--accent); }
 /* Десктоп: места хватает — обложку крупнее, карточку шире. */
 @media (min-width: 700px) {
   .bookinfo { max-width: 58rem; gap: 2rem; flex-wrap: nowrap; }
-  .bookinfo-cover { flex: 0 0 260px; max-width: 260px; }
+  .bookinfo-cover { flex: 0 0 260px; max-width: 260px; margin-inline: 0; }
 }
 @media (min-width: 1100px) {
   .bookinfo { max-width: 64rem; }

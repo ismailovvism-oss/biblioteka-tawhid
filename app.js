@@ -3487,7 +3487,6 @@ async function renderBookInfo(entry) {
     img.onerror = () => { img.remove(); cov.prepend(genCover(entry)); };
     cov.appendChild(img);
   } else cov.appendChild(genCover(entry));
-  applyBadges(cov, entry, true);
   box.appendChild(cov);
 
   const meta = document.createElement('div');
@@ -3495,6 +3494,13 @@ async function renderBookInfo(entry) {
   const h = document.createElement('h2');
   h.textContent = entryLabel(entry);
   meta.appendChild(h);
+  /* Статус — в сведениях, не поверх обложки: обложка рисованная, бейджи
+     перекрывали выходные данные (имя издательства, автора). На полке они
+     остаются на миниатюре — там колонки сведений нет. */
+  const status = document.createElement('div');
+  status.className = 'bookinfo-status';
+  applyBadges(status, entry, true);
+  if (status.childNodes.length) meta.appendChild(status);
   const subText = entry.title && Object.values(entry.title).find(v => v && v !== entryLabel(entry));
   if (subText) {
     const sub = document.createElement('div');
