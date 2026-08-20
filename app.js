@@ -31,7 +31,7 @@ const DEFAULTS = {
      книгой (SPEC 3.4c), в настройках их нет и быть не должно — это содержимое.
      func — рисовать ли служебные слова (в данных они есть всегда);
      onlyVerified — не рисовать секторы, которых человек не выверял. */
-  gloss: { on: false, size: 0.62, dim: 0.62, func: false, onlyVerified: false },
+  gloss: { on: false, size: 0.62, dim: 0.62, func: true, onlyVerified: false },
   marks: {},           // bookId → [пометка] — см. «пометки» ниже
   collections: [],     // сквозные тематические сборники из пометок
   // ↓ старые ключи: читаются один раз при миграции в marks и больше не пишутся
