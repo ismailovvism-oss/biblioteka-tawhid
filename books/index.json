@@ -88,6 +88,32 @@
         "образец формата",
         "тест"
       ]
+    },
+    {
+      "id": "crusoe",
+      "base": "books/crusoe/",
+      "title": {
+        "en": "Robinson Crusoe",
+        "ru": "Робинзон Крузо"
+      },
+      "cover": "books/crusoe/cover.jpg",
+      "category": "misc",
+      "progress": "ready",
+      "genre": [
+        "Повесть"
+      ],
+      "authors": [
+        "по мотивам Даниэля Дефо"
+      ],
+      "langs": [
+        "en"
+      ],
+      "tags": [
+        "английский",
+        "подстрочник",
+        "приключения"
+      ],
+      "era": "Современность"
     }
   ]
 }

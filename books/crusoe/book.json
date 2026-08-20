@@ -1,0 +1,91 @@
+{
+  "bookId": "crusoe",
+  "title": {
+    "en": "Robinson Crusoe",
+    "ru": "Робинзон Крузо"
+  },
+  "languages": [
+    "en"
+  ],
+  "rtl": [],
+  "chapters": [
+    {
+      "file": "01.md",
+      "title": {
+        "en": "Chapter One. The Word I Gave"
+      }
+    },
+    {
+      "file": "02.md",
+      "title": {
+        "en": "Chapter Two. The Storm"
+      }
+    },
+    {
+      "file": "03.md",
+      "title": {
+        "en": "Chapter Three. The Hold"
+      }
+    },
+    {
+      "file": "04.md",
+      "title": {
+        "en": "Chapter Four. The Rover"
+      }
+    },
+    {
+      "file": "05.md",
+      "title": {
+        "en": "Chapter Five. The House and the Boat"
+      }
+    },
+    {
+      "file": "06.md",
+      "title": {
+        "en": "Chapter Six. What I Would Not Sell"
+      }
+    },
+    {
+      "file": "07.md",
+      "title": {
+        "en": "Chapter Seven. Brazil, and the First of September"
+      }
+    },
+    {
+      "file": "08.md",
+      "title": {
+        "en": "Chapter Eight. What the Sea Gave Back"
+      }
+    },
+    {
+      "file": "09.md",
+      "title": {
+        "en": "Chapter Nine. The Star and the Bread"
+      }
+    },
+    {
+      "file": "10.md",
+      "title": {
+        "en": "Chapter Ten. The Print"
+      }
+    },
+    {
+      "file": "11.md",
+      "title": {
+        "en": "Chapter Eleven. Friday"
+      }
+    },
+    {
+      "file": "12.md",
+      "title": {
+        "en": "Chapter Twelve. The Ship, and the Door"
+      }
+    }
+  ],
+  "hasImages": false,
+  "gloss": [
+    "en"
+  ],
+  "author": "по мотивам Даниэля Дефо",
+  "description": "Оригинальный пересказ «Робинзона Крузо», написанный для этой библиотеки: сюжет и имена от Дефо, текст новый. Английский упрощён и выстроен по нарастающей — от 12 слов на предложение в первой главе до 17 в последней. Под каждым словом — русская подпись (SPEC 3.4c), готовилась ИИ по абзацу целиком, поэтому падежи согласованы, а одно слово в разных местах переводится по-разному. ⚠️ Подписи машинные и человеком не выверены: ни один сектор не помечен «ok». 36 иллюстраций сгенерированы ИИ в единой манере."
+}
