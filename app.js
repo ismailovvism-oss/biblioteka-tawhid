@@ -2873,6 +2873,130 @@ function normalize(str) {
   return normalizeWithMap(str).norm;
 }
 
+// ── оценка совпадения ─────────────────────────────────────────────────────
+// Раньше искали подстроку: запрос «الرضا بالكفر» не находил место, где между
+// словами стоит номер сноски или вводное слово, — а в изданных текстах это
+// сплошь и рядом. Теперь ищем слова и оцениваем, насколько кучно они легли:
+// точная фраза > по порядку и рядом > рядом в любом порядке > большинство слов.
+// Порядок надбавок взят у البحث الإجمالي Шамили.
+const СЛОВО = /[\p{L}\p{N}]+/gu;
+const РЯДОМ = 8;                                   // слов между крайними — ещё «рядом»
+const ВЕС = { фраза: 8, порядок: 4, рядом: 2, вместе: 1.5, часть: 1 };
+
+function токены(норм) {
+  const из = [];
+  for (const m of норм.matchAll(СЛОВО)) из.push({ w: m[0], от: m.index, до: m.index + m[0].length });
+  return из;
+}
+
+// Слово запроса засчитывается и как часть слова текста — так вело себя
+// прежнее подстрочное сравнение, и терять эту широту не хочется.
+// Для одно-двухбуквенных требуем точного совпадения, иначе «من» найдётся везде.
+const подходит = (слово, что) => что === слово || (слово.length >= 3 && что.includes(слово));
+
+function местаСлов(тк, запрос) {
+  return запрос.map(с => {
+    const где = [];
+    for (let i = 0; i < тк.length; i++) if (подходит(с, тк[i].w)) где.push(i);
+    return где;
+  });
+}
+
+/** Кратчайший отрезок, где слова идут по порядку. null — такого нет. */
+function поПорядку(места) {
+  let лучший = null;
+  for (const начало of места[0]) {
+    let текущий = начало;
+    let ладно = true;
+    for (let k = 1; k < места.length; k++) {
+      const дальше = места[k].find(i => i > текущий);
+      if (дальше === undefined) { ладно = false; break; }
+      текущий = дальше;
+    }
+    if (ладно && (!лучший || текущий - начало < лучший.до - лучший.от))
+      лучший = { от: начало, до: текущий };
+  }
+  return лучший;
+}
+
+/** Кратчайший отрезок, где встречаются все слова — порядок неважен. */
+function вЛюбомПорядке(места) {
+  const все = [];
+  места.forEach((где, k) => где.forEach(i => все.push({ i, k })));
+  все.sort((a, b) => a.i - b.i);
+  const счёт = new Map();
+  let лучший = null, левый = 0, разных = 0;
+  for (let правый = 0; правый < все.length; правый++) {
+    const k = все[правый].k;
+    счёт.set(k, (счёт.get(k) || 0) + 1);
+    if (счёт.get(k) === 1) разных++;
+    while (разных === места.length) {
+      const ширина = все[правый].i - все[левый].i;
+      if (!лучший || ширина < лучший.до - лучший.от)
+        лучший = { от: все[левый].i, до: все[правый].i };
+      const ушёл = все[левый].k;
+      счёт.set(ушёл, счёт.get(ушёл) - 1);
+      if (счёт.get(ушёл) === 0) разных--;
+      левый++;
+    }
+  }
+  return лучший;
+}
+
+/** Одно слово для подсветки у слабых совпадений: самое длинное из найденных. */
+function якорноеСлово(тк, места, запрос) {
+  let лучшее = null;
+  места.forEach((где, k) => {
+    if (!где.length) return;
+    if (!лучшее || запрос[k].length > запрос[лучшее.k].length) лучшее = { k, i: где[0] };
+  });
+  const т = тк[лучшее.i];
+  return { от: т.от, до: т.до };
+}
+
+/**
+ * Насколько текст отвечает запросу. Возвращает {вес, от, до} в координатах
+ * нормализованной строки либо null, если совпадения нет.
+ */
+function оценить(норм, запрос) {
+  const тк = токены(норм);
+  if (!тк.length) return null;
+  const места = местаСлов(тк, запрос);
+  const найдено = места.filter(где => где.length).length;
+  if (!найдено) return null;
+
+  const отрезок = (от, до) => ({ от: тк[от].от, до: тк[до].до });
+  let вес, границы;
+
+  if (найдено < запрос.length) {
+    // не все слова — годится, только если нашлась хотя бы половина
+    if (найдено * 2 < запрос.length) return null;
+    const первое = места.findIndex(где => где.length);
+    const последнее = места.length - 1 - [...места].reverse().findIndex(где => где.length);
+    вес = ВЕС.часть;
+    границы = отрезок(места[первое][0], места[последнее].at(-1));
+  } else {
+    const порядком = поПорядку(места);
+    const любым = вЛюбомПорядке(места);
+    const запас = запрос.length - 1;
+    if (порядком && порядком.до - порядком.от === запас) вес = ВЕС.фраза;
+    else if (порядком && порядком.до - порядком.от <= запас + РЯДОМ) вес = ВЕС.порядок;
+    else if (любым && любым.до - любым.от <= запас + РЯДОМ) вес = ВЕС.рядом;
+    else вес = ВЕС.вместе;
+    границы = отрезок(...(порядком && вес !== ВЕС.рядом
+      ? [порядком.от, порядком.до] : [любым.от, любым.до]));
+  }
+
+  // Когда слова разбросаны по всему сектору, подсвечивать промежуток от первого
+  // до последнего бессмысленно — красится весь абзац. Показываем одно слово:
+  // самое длинное из найденных, оно же обычно самое содержательное.
+  if (вес <= ВЕС.вместе) границы = якорноеСлово(тк, места, запрос);
+
+  // что чаще повторяется — то выше; логарифм, чтобы длинный сектор не побеждал сам собой
+  const всего = места.reduce((с, где) => с + где.length, 0);
+  return { вес: вес * (1 + Math.log2(1 + всего) / 4), от: границы.от, до: границы.до };
+}
+
 const htmlToText = (() => {
   const tmp = document.createElement('div');
   return html => { tmp.innerHTML = html; return tmp.textContent || ''; };
@@ -2990,11 +3114,13 @@ function setSearchScope(mode) {
   $('#search-input').placeholder = mode === 'library' ? 'Поиск по всей библиотеке…' : 'Поиск по книге…';
 }
 
-const SEARCH_CAP = 300;
+const SEARCH_CAP = 300;        // сколько показываем
+const SEARCH_SCAN = 2000;      // сколько собираем, прежде чем ранжировать
 async function runSearch(raw) {
-  const q = normalize(raw).trim();
+  const норма = normalize(raw).trim();
+  const запрос = норма.match(СЛОВО) || [];
   const box = $('#search-results');
-  if (q.length < 2) { box.textContent = 'Введите минимум 2 символа.'; return; }
+  if (норма.length < 2 || !запрос.length) { box.textContent = 'Введите минимум 2 символа.'; return; }
   const seq = ++searchSeq;
   box.textContent = 'Поиск…';
   const libraryScope = searchScopeMode === 'library' || !bookId;
@@ -3014,30 +3140,35 @@ async function runSearch(raw) {
           if (pair[lang] == null) continue;
           const text = htmlToText(pair[lang]);
           const { norm, map } = normalizeWithMap(text);
-          const idx = norm.indexOf(q);
-          if (idx >= 0) results.push({
+          const оценка = оценить(norm, запрос);
+          if (оценка) results.push({
             bookId: entry.id, bookTitle: entryLabel(entry),
             ci, chTitle: searchChapterTitle(m, ci),
             id: pair.id, lang, rtl: m.rtl.includes(lang),
-            text, start: map[idx], end: map[idx + q.length - 1] + 1,
+            text, вес: оценка.вес,
+            start: map[оценка.от], end: map[оценка.до - 1] + 1,
           });
         }
       }
-      if (results.length >= SEARCH_CAP) { capped = true; break; }
+      if (results.length >= SEARCH_SCAN) { capped = true; break; }
     }
     if (capped) break;
   }
   if (seq !== searchSeq) return;
-  renderResults(results, raw.trim(), libraryScope, capped);
+  // сверху то, что ближе к запросу: сперва точная фраза, потом рядом, потом врозь
+  results.sort((a, b) => b.вес - a.вес);
+  renderResults(results.slice(0, SEARCH_CAP), raw.trim(), libraryScope,
+                capped || results.length > SEARCH_CAP, results.length);
 }
 
-function renderResults(results, label, libraryScope, capped) {
+function renderResults(results, label, libraryScope, capped, всего = results.length) {
   const box = $('#search-results');
   box.innerHTML = '';
   if (!results.length) { box.textContent = `Ничего не найдено: «${label}».`; return; }
   const head = document.createElement('div');
   head.className = 'search-count';
-  head.textContent = `Найдено: ${results.length}${capped ? '+ (показаны первые)' : ''}`;
+  head.textContent = `Найдено: ${всего}${capped ? '+' : ''}`
+    + (всего > results.length ? ` · показаны ${results.length} самых точных` : '');
   box.appendChild(head);
   for (const r of results) {
     const item = document.createElement('button');
