@@ -56,6 +56,12 @@ jobs:
             node tools/validate.js "${b%/}"
           done
 
+      # Связность реестра: повторы id, пропавшие папки и обложки, поля под фасеты,
+      # разделы мимо taxonomy. Замечания деплой не блокируют — падает только на
+      # настоящих поломках (нет папки, нет book.json, глава пуста во всех языках).
+      - name: Аудит библиотеки
+        run: node tools/doctor.js
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
