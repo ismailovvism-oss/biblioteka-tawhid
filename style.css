@@ -1564,3 +1564,11 @@ mark.mtsel {
   box-shadow: none;
 }
 #mt-card.mt-inline .mt-body { overflow: visible; max-height: none; }
+
+/* пометка потеряла своё место после переимпорта книги */
+.mark-orphan {
+  display: block;
+  font-size: .78rem;
+  color: var(--warn, #a2662a);
+  margin-top: .15rem;
+}

@@ -352,6 +352,7 @@ function renderChapter() {
     stream.appendChild(note);
   }
   applyVisibility();
+  сверитьПометки();
   applyMarks();
   applyGloss();   // подстрочник кладётся последним — поверх уже покрашенных пометок
 }
@@ -755,6 +756,77 @@ function allTags() {
 }
 
 /* ===== пометки: нанесение на текущую главу ===== */
+/* ===== сверка пометок с текстом =====
+ * Пометка привязана дважды: якорем (сектор + смещения) и снимком фрагмента.
+ * При переимпорте книги смещения уезжают, и якорь начинает указывать на другой
+ * текст — раньше он молча красился не там. Для библиотеки, где цитаты идут в
+ * разбор, покрасить не то хуже, чем не покрасить.
+ *
+ * Теперь перед покраской сверяем со снимком: сходится — красим; не сходится —
+ * ищем снимок заново и перепривязываем, но ТОЛЬКО при точном совпадении, иначе
+ * получим ту же тихую ошибку, но уже с нашей подписи. Не нашли — не красим и
+ * помечаем `orphan`, чтобы расхождение было видно в списке, а не терялось.
+ */
+const сжать = s => s.replace(/\s+/g, ' ').trim();
+
+/** Сжатая строка + карта: индекс в сжатой → индекс в исходной. */
+function сжатьСКартой(s) {
+  let norm = '', пробел = false;
+  const map = [];
+  for (let i = 0; i < s.length; i++) {
+    if (/\s/.test(s[i])) { пробел = true; continue; }
+    if (пробел && norm) { norm += ' '; map.push(i); }
+    пробел = false;
+    norm += s[i]; map.push(i);
+  }
+  return { norm, map };
+}
+
+/** Где в члене пары лежит снимок. null — точного совпадения нет. */
+function найтиСнимок(member, снимок) {
+  const { norm, map } = сжатьСКартой(member.textContent);
+  const i = norm.indexOf(снимок);
+  if (i < 0) return null;
+  return { start: map[i], end: map[i + снимок.length - 1] + 1 };
+}
+
+/**
+ * Сверка пометок главы со снимками — ОДИН раз на отрисовку главы, а не на
+ * каждую покраску: поиск снимка перечитывает всю главу, а перекрашиваемся мы
+ * часто (подстрочник, правка пометки, скролл). Первая версия делала сверку
+ * внутри applyMarks и подвешивала вкладку на книге с потерянной пометкой.
+ */
+function сверитьПометки() {
+  let изменено = false;
+  const члены = {};   // язык -> члены главы, собираем лениво и один раз
+
+  for (const m of getMarks()) {
+    if (!isClip(m) || m.chapter !== chapterIndex) continue;
+    if (!m.text) continue;              // у старых пометок снимка нет — сверять не с чем
+
+    const свой = pairById(m.sector)?.querySelector(`.member.lang-${m.lang}`);
+    if (свой && сжать(свой.textContent.slice(m.start, m.end)) === m.text) {
+      if (m.orphan) { delete m.orphan; изменено = true; }
+      continue;                          // якорь цел
+    }
+
+    const список = члены[m.lang] ||= [...stream.querySelectorAll(`.member.lang-${m.lang}`)];
+    let нашлось = false;
+    for (const el of (свой ? [свой, ...список.filter(x => x !== свой)] : список)) {
+      const место = найтиСнимок(el, m.text);
+      if (!место) continue;
+      m.sector = el.closest('.pair')?.dataset.id || m.sector;
+      m.start = место.start; m.end = место.end;
+      m.moved = Date.now();
+      delete m.orphan;
+      нашлось = изменено = true;
+      break;
+    }
+    if (!нашлось && !m.orphan) { m.orphan = true; изменено = true; }
+  }
+  if (изменено) saveSettings();
+}
+
 function applyMarks() {
   // закладки на сектор — метка на самой паре
   const secIds = new Set(getMarks().filter(m => !isClip(m) && m.chapter === chapterIndex).map(m => m.sector));
@@ -763,7 +835,7 @@ function applyMarks() {
   });
   // вырезки — подкраска фрагмента внутри члена пары
   for (const m of getMarks()) {
-    if (!isClip(m) || m.chapter !== chapterIndex) continue;
+    if (!isClip(m) || m.chapter !== chapterIndex || m.orphan) continue;
     const pairEl = pairById(m.sector);
     const member = pairEl && pairEl.querySelector(`.member.lang-${m.lang}`);
     if (!member) continue;
@@ -1050,6 +1122,15 @@ function markRow(m, bid, { compact = false } = {}) {
   meta.className = 'bm-meta';
   meta.textContent = markPlace(bid, m, !compact);
   go.appendChild(meta);
+
+  // книгу переимпортировали, а снимок в тексте больше не находится: место
+  // потеряно, но сама мысль сохранена — показываем это, а не молчим
+  if (m.orphan) {
+    const плашка = document.createElement('span');
+    плашка.className = 'mark-orphan';
+    плашка.textContent = 'текст изменился — место не найдено';
+    go.appendChild(плашка);
+  }
 
   if (m.text) {
     const quote = document.createElement('span');
