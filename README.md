@@ -141,8 +141,8 @@ node tools/doctor.js --строго   # считать замечания оши
 
 ```bash
 # 1. .bok → сырьё (markdown с маркерами страниц и заголовками)
-~/projects/shamela-books/.venv/bin/python \
-  ~/projects/shamela-books/bok2md.py книга.bok --куда /tmp/сырьё --id <bookId>
+~/projects/shamela/import/.venv/bin/python \
+  ~/projects/shamela/import/bok2md.py книга.bok --куда /tmp/сырьё --id <bookId>
 
 # 2. сырьё → Контракт + book.json + запись в реестре
 node tools/import-bok.js /tmp/сырьё

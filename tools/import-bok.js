@@ -5,7 +5,7 @@
  * Импорт одноязычной книги из старого формата Шамили 3 (`.bok`).
  *
  * Шаг 1 (питон, читает Access):
- *   ~/projects/shamela-books/.venv/bin/python ~/projects/shamela-books/bok2md.py \
+ *   ~/projects/shamela/import/.venv/bin/python ~/projects/shamela/import/bok2md.py \
  *       книга.bok --куда /tmp/сырьё --id <bookId>
  * Шаг 2 (здесь, пишет Контракт):
  *   node tools/import-bok.js /tmp/сырьё
