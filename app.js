@@ -220,9 +220,36 @@ function pickTitle(t) {
 }
 
 // поиск пары по id сравнением dataset (без построения CSS-селектора из данных)
+/* Глава пары, а не глобальная `chapterIndex`.
+ *
+ * Раньше номер главы брали из состояния приложения — и он попадал прямо в
+ * пользовательские данные: им помечаются пометки и сохранённая позиция. Пока в
+ * потоке одна глава, разницы нет. Но как только рядом ляжет вторая (непрерывное
+ * чтение, BACKLOG 22.08.2026), выделение во второй записалось бы с номером
+ * первой — тихая порча ровно того рода, который лечит сверка пометок.
+ *
+ * Поэтому источник истины — сама пара. Глобальная переменная остаётся запасным
+ * вариантом: для случаев, когда пары под рукой нет (перевод без активной пары).
+ */
+function chapterOf(el) {
+  const пара = el && (el.closest ? el.closest('.pair') : null);
+  const n = пара && Number(пара.dataset.chapter);
+  return Number.isInteger(n) ? n : chapterIndex;
+}
+
 function pairById(id) {
   if (!id) return null;
   for (const el of stream.querySelectorAll('.pair')) if (el.dataset.id === id) return el;
+  return null;
+}
+
+/* Пара по главе И сектору. `s003` есть в каждой главе, поэтому искать только по
+   сектору можно, лишь пока в потоке одна глава. Пометки знают свою главу — вот
+   по ней и ищем. */
+function pairAt(глава, id) {
+  if (!id) return null;
+  for (const el of stream.querySelectorAll('.pair'))
+    if (el.dataset.id === id && Number(el.dataset.chapter) === Number(глава)) return el;
   return null;
 }
 function scrollToPair(id, smooth) {
@@ -310,6 +337,7 @@ function renderChapter() {
     }
     const el = document.createElement('article');
     el.className = 'pair' + (pair.type === 'footnote' ? ' is-footnote' : '');
+    el.dataset.chapter = chapterIndex;   // см. chapterOf: глава — свойство пары
     el.dataset.id = pair.id + (pair.lang ? '@' + pair.lang : ''); // сноски пер-язычные → id уникален
     if (pair.page != null) el.dataset.page = pair.page;
     if (pair.type === 'footnote') {
@@ -438,7 +466,7 @@ function updateProgress() {
 let posSaveTick = null;
 function rememberPosition() {
   if (!book || !activeEl || loading) return; // во время загрузки activeEl может быть из старой главы
-  setLast(bookId, { chapter: chapterIndex, sector: activeEl.dataset.id, page: currentPage(), ts: Date.now() });
+  setLast(bookId, { chapter: chapterOf(activeEl), sector: activeEl.dataset.id, page: currentPage(), ts: Date.now() });
   if (posSaveTick) clearTimeout(posSaveTick);
   posSaveTick = setTimeout(saveSettings, 500);
 }
@@ -800,22 +828,29 @@ function сверитьПометки() {
   let изменено = false;
   const члены = {};   // язык -> члены главы, собираем лениво и один раз
 
+  const главыВПотоке = new Set(
+    [...stream.querySelectorAll('.pair')].map(el => Number(el.dataset.chapter)));
+
   for (const m of getMarks()) {
-    if (!isClip(m) || m.chapter !== chapterIndex) continue;
+    if (!isClip(m) || !главыВПотоке.has(Number(m.chapter))) continue;
     if (!m.text) continue;              // у старых пометок снимка нет — сверять не с чем
 
-    const свой = pairById(m.sector)?.querySelector(`.member.lang-${m.lang}`);
+    const свой = pairAt(m.chapter, m.sector)?.querySelector(`.member.lang-${m.lang}`);
     if (свой && сжать(свой.textContent.slice(m.start, m.end)) === m.text) {
       if (m.orphan) { delete m.orphan; изменено = true; }
       continue;                          // якорь цел
     }
 
-    const список = члены[m.lang] ||= [...stream.querySelectorAll(`.member.lang-${m.lang}`)];
+    const ключ = m.chapter + '/' + m.lang;
+    const список = члены[ключ] ||= [...stream.querySelectorAll(`.pair[data-chapter="${m.chapter}"]`)]
+      .map(п => п.querySelector(`.member.lang-${m.lang}`)).filter(Boolean);
     let нашлось = false;
     for (const el of (свой ? [свой, ...список.filter(x => x !== свой)] : список)) {
       const место = найтиСнимок(el, m.text);
       if (!место) continue;
-      m.sector = el.closest('.pair')?.dataset.id || m.sector;
+      const пара = el.closest('.pair');
+      m.sector = пара?.dataset.id || m.sector;
+      if (пара) m.chapter = chapterOf(пара);   // ищем в своей главе, но пусть будет явно
       m.start = место.start; m.end = место.end;
       m.moved = Date.now();
       delete m.orphan;
@@ -829,14 +864,14 @@ function сверитьПометки() {
 
 function applyMarks() {
   // закладки на сектор — метка на самой паре
-  const secIds = new Set(getMarks().filter(m => !isClip(m) && m.chapter === chapterIndex).map(m => m.sector));
+  const закладки = new Set(getMarks().filter(m => !isClip(m)).map(m => m.chapter + ':' + m.sector));
   stream.querySelectorAll('.pair').forEach(el => {
-    el.classList.toggle('bookmarked', secIds.has(el.dataset.id));
+    el.classList.toggle('bookmarked', закладки.has(el.dataset.chapter + ':' + el.dataset.id));
   });
   // вырезки — подкраска фрагмента внутри члена пары
   for (const m of getMarks()) {
-    if (!isClip(m) || m.chapter !== chapterIndex || m.orphan) continue;
-    const pairEl = pairById(m.sector);
+    if (!isClip(m) || m.orphan) continue;
+    const pairEl = pairAt(m.chapter, m.sector);
     const member = pairEl && pairEl.querySelector(`.member.lang-${m.lang}`);
     if (!member) continue;
     const cls = 'hl hl-' + (m.color || DEFAULT_COLOR) + (m.note ? ' has-note' : '');
@@ -880,7 +915,7 @@ function addRangeMark(color = DEFAULT_COLOR, openNote = false) {
   if (!off) return null;
   const mark = {
     id: newMarkId(),
-    chapter: chapterIndex,
+    chapter: chapterOf(pairEl),
     sector: pairEl.dataset.id,
     lang: member.getAttribute('lang'),
     start: off.start,
@@ -909,10 +944,11 @@ function toggleActiveBookmark() {
   if (!book || !activeEl) return;
   const secId = activeEl.dataset.id;
   const list = markList();
-  const i = list.findIndex(m => !isClip(m) && m.sector === secId && m.chapter === chapterIndex);
+  const глава = chapterOf(activeEl);
+  const i = list.findIndex(m => !isClip(m) && m.sector === secId && m.chapter === глава);
   if (i >= 0) list.splice(i, 1);
   else list.push({
-    id: newMarkId(), chapter: chapterIndex, sector: secId, lang: null,
+    id: newMarkId(), chapter: глава, sector: secId, lang: null,
     start: null, end: null, color: null, note: '', tags: [],
     text: (activeEl.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 300),
     page: currentPage(), ts: Date.now(), edited: 0,
@@ -1482,7 +1518,7 @@ bindClick('#mt-to-note', () => {
   if (!t || !book) return;
   const list = markList();
   list.push({
-    id: newMarkId(), chapter: chapterIndex, sector: activeEl ? activeEl.dataset.id : 's001',
+    id: newMarkId(), chapter: chapterOf(activeEl), sector: activeEl ? activeEl.dataset.id : 's001',
     lang: mtPending.from, start: null, end: null, color: null,
     note: `[машинный перевод${mtPromptCur().id === 'plain' ? '' : ' · ' + mtPromptCur().label}] ` + t,
     tags: ['машинный перевод'],
