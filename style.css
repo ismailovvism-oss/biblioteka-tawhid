@@ -1144,6 +1144,11 @@ mark.hl.has-note { box-shadow: inset 0 -0.14em 0 var(--accent); }
 .bookinfo-dim { color: var(--muted, #777); font-size: 0.9rem; }
 .bookinfo-desc { margin: 0.7rem 0 0; line-height: 1.55; }
 .bookinfo-actions { margin-top: 1rem; display: flex; gap: 0.6rem; flex-wrap: wrap; }
+.bookinfo-draft {
+  padding: 0.5rem 0.8rem; border-radius: 8px;
+  border: 1px dashed var(--border); color: var(--muted, #777);
+  background: var(--panel); font-size: 0.95rem;
+}
 .bookinfo-read {
   background: var(--accent, #b07a2c);
   color: #fff;

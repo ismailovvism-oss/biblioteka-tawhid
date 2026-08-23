@@ -4123,6 +4123,19 @@ async function renderBookInfo(entry) {
     history.pushState({}, '', '?book=' + encodeURIComponent(entry.id));
     openBook(entry, opts);
   };
+  /* `draft: true` в реестре — карточка книги есть, а текста ещё нет: показываем
+     аннотацию и оглавление, но читать не даём. Нужно, чтобы объявить работу,
+     не выкладывая черновик. Прямой ?book=<id> тоже уводится на карточку (route). */
+  if (entry.draft) {
+    const плашка = document.createElement('div');
+    плашка.className = 'bookinfo-draft';
+    плашка.textContent = '🚧 В разработке — текст ещё не выложен';
+    actions.appendChild(плашка);
+    meta.appendChild(actions);
+    box.appendChild(meta);
+    stream.appendChild(box);
+    return;
+  }
   const l = getLast(entry.id);
   const primary = document.createElement('button');
   primary.type = 'button';
@@ -4207,6 +4220,7 @@ function route() {
   const sector = params.get('s');
   // id сектора — только безопасные символы (sNNN/fnNNN/s050a и т.п.)
   const safeSector = sector && /^[\w-]+$/.test(sector) ? sector : null;
+  if (entry && entry.draft) { renderBookInfo(entry); return; }   // текста ещё нет
   if (entry) { openBook(entry, { sector: safeSector }); return; }
   const info = params.get('info');
   const infoEntry = info ? library.find(b => b.id === info) : null;
