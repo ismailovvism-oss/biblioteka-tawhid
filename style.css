@@ -435,6 +435,17 @@ body[data-layout="h"][data-colrtl] .pair > .member[dir="rtl"] {
 .font-size-val { color: var(--muted); font-size: 0.85rem; min-width: 3ch; text-align: end; }
 .font-hint { color: var(--muted); font-size: 0.82rem; line-height: 1.35; margin-top: 0.15rem; }
 
+/* Поиск по полке: кнопка, на её месте вырастает поле (см. app.js — Chrome
+   заполнял почтой поле, существующее на загрузке). */
+.shelf-qwrap { flex: 1 1 12rem; min-width: 0; display: flex; }
+.shelf-qwrap .shelf-search { width: 100%; }
+.shelf-qbtn {
+  width: 100%; font: inherit; text-align: start;
+  padding: 0.35rem 0.6rem; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg); color: var(--muted); cursor: pointer;
+}
+.shelf-qbtn:hover { color: var(--fg); }
+
 /* ===== ПОДСТРОЧНИК: перевод под словом ======================================
  * Глоссу рисует ПСЕВДОЭЛЕМЕНТ из data-g, а не <ruby><rt> — и это не украшение,
  * а условие совместимости: содержимое ::after не входит в textContent. От

@@ -3941,35 +3941,66 @@ function renderLibrary() {
   const bar = document.createElement('div');
   bar.className = 'shelf-bar';
 
-  const q = document.createElement('input');
-  q.type = 'search';
-  q.className = 'shelf-search';
-  q.placeholder = 'Название, автор, тема…';
-  q.value = shelfQuery;
-  q.setAttribute('aria-label', 'Поиск по полке');
-  /* Chrome подставлял сюда сохранённую почту: у сайта есть форма входа
-     (#acc-email, type=email), браузер запомнил адрес и лил его в первое
-     подходящее текстовое поле. Полка фильтровалась по чужой строке и выглядела
-     пустой — «книги пропали».
+  /* ⚠ Поля поиска на полке НЕТ в разметке до первого нажатия — и это не
+     украшение, а лечение.
 
-     ⚠ Одного autocomplete="off" НЕ хватило (проверено на живом сайте): для полей,
-     которые менеджер паролей счёл именем пользователя, Chrome его игнорирует.
-     Работает другое — readonly: такие поля автозаполнение не трогает. Снимаем
-     пометку по первому касанию, причём на pointerdown, а не на focus: focus
-     приходит позже, и на мобильном клавиатура успела бы не открыться. */
-  q.autocomplete = 'off';
-  q.spellcheck = false;
-  q.setAttribute('enterkeyhint', 'search');
-  /* readonly-до-касания сюда не годится: он глушит автозаполнение, но заодно
-     мешает вводу (проверено — в поле не напечатать). Поэтому не мешаем браузеру,
-     а вычищаем за ним: поле, которое МЫ оставили пустым, само значения получить
-     не может — значит, его подставил менеджер паролей. Chrome делает это
-     не сразу, отсюда две проверки: сразу и с запасом. */
-  const вычиститьЧужое = () => {
-    if (!shelfQuery && q.value) { q.value = ''; paint(); }
+     У сайта есть форма входа (#acc-email, type=email); Chrome запомнил адрес
+     и лил его в первое подходящее текстовое поле на полке. Полка фильтровалась
+     по чужой строке и выглядела пустой — «книги пропали». Не помогли ни
+     autocomplete="off" (для полей, которые менеджер паролей счёл именем
+     пользователя, Chrome его игнорирует), ни уборка значения после загрузки
+     (Chrome заполняет снова). Единственное, что работает наверняка: заполнять
+     нечего, если поля на загрузке не существует. Тем же и объясняется, почему
+     поиск в оверлее (#search-input) почтой никогда не забивался — он скрыт.
+
+     readonly-до-касания не берём: он глушит автозаполнение, но на части
+     мобильных браузеров мешает открытию клавиатуры, а цена ошибки — неработающий
+     поиск на телефоне. */
+  const поиск = document.createElement('div');
+  поиск.className = 'shelf-qwrap';
+  let q = null, qTimer = null;
+
+  const открытьПоиск = (значение = '') => {
+    if (q) { q.focus(); return; }
+    поиск.innerHTML = '';
+    q = document.createElement('input');
+    q.type = 'search';
+    q.className = 'shelf-search';
+    q.placeholder = 'Название, автор, тема…';
+    q.value = значение;
+    q.autocomplete = 'off';
+    q.spellcheck = false;
+    q.setAttribute('enterkeyhint', 'search');
+    q.setAttribute('aria-label', 'Поиск по полке');
+    q.addEventListener('input', () => {
+      shelfQuery = q.value.trim();
+      clearTimeout(qTimer);
+      qTimer = setTimeout(paint, 120);   // не перерисовывать список на каждое нажатие
+    });
+    q.addEventListener('keydown', e => {
+      if (e.key !== 'Escape') return;
+      shelfQuery = '';
+      закрытьПоиск();
+      paint();
+    });
+    поиск.appendChild(q);
+    q.focus();
   };
-  setTimeout(вычиститьЧужое, 0);
-  setTimeout(вычиститьЧужое, 400);
+
+  const закрытьПоиск = () => {
+    q = null;
+    поиск.innerHTML = '';
+    const кнопка = document.createElement('button');
+    кнопка.type = 'button';
+    кнопка.className = 'shelf-qbtn';
+    кнопка.textContent = '🔍 Поиск';
+    кнопка.title = 'Поиск по полке: название, автор, тема';
+    кнопка.addEventListener('click', () => открытьПоиск());
+    поиск.appendChild(кнопка);
+  };
+
+  закрытьПоиск();
+  if (shelfQuery) открытьПоиск(shelfQuery);   // запрос пережил перерисовку — поле нужно сразу
 
   const sort = document.createElement('select');
   sort.className = 'shelf-sort';
@@ -4003,7 +4034,7 @@ function renderLibrary() {
   const count = document.createElement('span');
   count.className = 'shelf-count';
 
-  bar.append(q, sort, sw, filt, count);
+  bar.append(поиск, sort, sw, filt, count);
   stream.appendChild(bar);
   updateFilterBadge();
 
@@ -4029,12 +4060,6 @@ function renderLibrary() {
     }
   };
 
-  let qTimer = null;
-  q.addEventListener('input', () => {
-    shelfQuery = q.value.trim();
-    clearTimeout(qTimer);
-    qTimer = setTimeout(paint, 120);   // не перерисовывать список на каждое нажатие
-  });
   sort.addEventListener('change', () => {
     settings.shelfSort = sort.value;
     saveSettings();
