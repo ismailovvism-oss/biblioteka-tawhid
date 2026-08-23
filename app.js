@@ -19,6 +19,7 @@ const DEFAULTS = {
   margin: 0.8,         // боковые поля колонки чтения, rem
   colRatio: 1,         // доля ширины оригинала в две колонки (перевод = 2 - colRatio)
   colRtl: true,        // в две колонки RTL-язык справа
+  noTashkil: false,    // показывать арабский без огласовок (данные не трогаем, см. снятьТашкиль)
   shelfCat: [],        // выбранный путь в дереве категорий ([] = корень)
   shelfFacets: {},     // активные фасеты: { langs:[], authors:[], era:[], tags:[] }
   last: {},            // bookId → { chapter, sector, page, ts }
@@ -380,6 +381,11 @@ function renderChapter() {
     stream.appendChild(note);
   }
   applyVisibility();
+  // проверяем ДО снятия: иначе режим «без огласовок» сам бы и спрятал свой переключатель
+  const естьТашкиль = естьОгласовки(stream.textContent);
+  if (settings.noTashkil) снятьТашкиль(stream);   // до сверки: она считает по показанному тексту
+  const грТашкиль = $('#set-tashkil');
+  if (грТашкиль) грТашкиль.hidden = !естьТашкиль;
   сверитьПометки();
   applyMarks();
   applyGloss();   // подстрочник кладётся последним — поверх уже покрашенных пометок
@@ -795,7 +801,34 @@ function allTags() {
  * получим ту же тихую ошибку, но уже с нашей подписи. Не нашли — не красим и
  * помечаем `orphan`, чтобы расхождение было видно в списке, а не терялось.
  */
-const сжать = s => s.replace(/\s+/g, ' ').trim();
+/* Огласовки, которые снимает режим «без ташкиля»: фатха/дамма/касра, их танвины,
+   сукун и надстрочный алиф. ШАДДА (U+0651) НЕ входит — она различает породы
+   глагола, и без неё текст читается уже неверно; то же правило выведено при
+   работе над подстрочником (glossNormalizeBase). */
+const ОГЛАСОВКИ = /[\u064B-\u0650\u0652\u0670]/g;
+
+/**
+ * Снять огласовки в уже построенном DOM — правим значения текстовых узлов
+ * на месте. Оборачивать знаки в спаны нельзя: разрыв слова на инлайн-элементы
+ * ломает связность арабской вязи, буквы встают в изолированных формах.
+ * Данные книги при этом не меняются: на диске текст остаётся дословным.
+ */
+function снятьТашкиль(root) {
+  const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let n = w.nextNode(); n; n = w.nextNode()) {
+    if (ОГЛАСОВКИ.test(n.nodeValue)) {
+      ОГЛАСОВКИ.lastIndex = 0;
+      n.nodeValue = n.nodeValue.replace(ОГЛАСОВКИ, '');
+    }
+    ОГЛАСОВКИ.lastIndex = 0;             // regex с /g — глобальный lastIndex
+  }
+}
+
+const естьОгласовки = s => { ОГЛАСОВКИ.lastIndex = 0; return ОГЛАСОВКИ.test(s); };
+
+/* Сверка снимков идёт БЕЗ огласовок: иначе переключение режима осиротило бы
+   каждую пометку внутри арабской цитаты — снимок с огласовками, а текст уже без. */
+const сжать = s => s.replace(ОГЛАСОВКИ, '').replace(/\s+/g, ' ').trim();
 
 /** Сжатая строка + карта: индекс в сжатой → индекс в исходной. */
 function сжатьСКартой(s) {
@@ -803,6 +836,7 @@ function сжатьСКартой(s) {
   const map = [];
   for (let i = 0; i < s.length; i++) {
     if (/\s/.test(s[i])) { пробел = true; continue; }
+    if (естьОгласовки(s[i])) continue;   // см. сжать: сверка нечувствительна к ташкилю
     if (пробел && norm) { norm += ' '; map.push(i); }
     пробел = false;
     norm += s[i]; map.push(i);
@@ -836,7 +870,10 @@ function сверитьПометки() {
     if (!m.text) continue;              // у старых пометок снимка нет — сверять не с чем
 
     const свой = pairAt(m.chapter, m.sector)?.querySelector(`.member.lang-${m.lang}`);
-    if (свой && сжать(свой.textContent.slice(m.start, m.end)) === m.text) {
+    // снимок нормализуем ТОЖЕ: он сохранён с огласовками, а показанный текст
+    // может быть уже без них — иначе переключение режима осиротило бы пометку
+    const снимок = сжать(m.text);
+    if (свой && сжать(свой.textContent.slice(m.start, m.end)) === снимок) {
       if (m.orphan) { delete m.orphan; изменено = true; }
       continue;                          // якорь цел
     }
@@ -846,7 +883,7 @@ function сверитьПометки() {
       .map(п => п.querySelector(`.member.lang-${m.lang}`)).filter(Boolean);
     let нашлось = false;
     for (const el of (свой ? [свой, ...список.filter(x => x !== свой)] : список)) {
-      const место = найтиСнимок(el, m.text);
+      const место = найтиСнимок(el, снимок);
       if (!место) continue;
       const пара = el.closest('.pair');
       m.sector = пара?.dataset.id || m.sector;
@@ -2678,6 +2715,38 @@ function setupFontSettings() {
     cg.appendChild(lbl);
   }
   wrap.appendChild(cg);
+
+  /* Ташкиль. Группу строим всегда, а показываем по факту: есть ли огласовки
+     в отрисованной главе (см. renderChapter). Судить здесь по `pairs` нельзя —
+     панель строится при открытии книги, когда глава ещё не загружена. */
+  {
+    const tg = document.createElement('div');
+    tg.id = 'set-tashkil';
+    tg.hidden = true;
+    tg.className = 'font-group';
+    const th = document.createElement('div');
+    th.className = 'font-lang';
+    th.textContent = 'Арабский';
+    tg.appendChild(th);
+    const lbl = document.createElement('label');
+    lbl.className = 'row';
+    lbl.append('Без огласовок (ташкиля)');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = !!settings.noTashkil;
+    cb.addEventListener('change', () => {
+      settings.noTashkil = cb.checked;
+      saveSettings();
+      renderChapter();          // снятие идёт при отрисовке — перерисовываем главу
+    });
+    lbl.appendChild(cb);
+    tg.appendChild(lbl);
+    const hint = document.createElement('div');
+    hint.className = 'font-hint';
+    hint.textContent = 'Шадда остаётся: она различает породы. Текст книги не меняется — только показ.';
+    tg.appendChild(hint);
+    wrap.appendChild(tg);
+  }
 }
 
 // слайдер с живой подписью значения; onInput применяет, change сохраняет

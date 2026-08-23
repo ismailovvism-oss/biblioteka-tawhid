@@ -433,6 +433,7 @@ body[data-layout="h"][data-colrtl] .pair > .member[dir="rtl"] {
 }
 .font-group label { margin: 0.45rem 0; }
 .font-size-val { color: var(--muted); font-size: 0.85rem; min-width: 3ch; text-align: end; }
+.font-hint { color: var(--muted); font-size: 0.82rem; line-height: 1.35; margin-top: 0.15rem; }
 
 /* ===== ПОДСТРОЧНИК: перевод под словом ======================================
  * Глоссу рисует ПСЕВДОЭЛЕМЕНТ из data-g, а не <ruby><rt> — и это не украшение,
