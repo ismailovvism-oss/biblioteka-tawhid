@@ -1121,6 +1121,10 @@ mark.hl.has-note { box-shadow: inset 0 -0.14em 0 var(--accent); }
   max-width: min(62vw, 300px);
   margin-inline: auto;
   aspect-ratio: 5 / 7.4;
+  /* Без этого флекс-контейнер растягивает колонку обложки по высоте длинного
+     описания, aspect-ratio уступает растяжке, и `object-fit: cover` срезает
+     обложку по бокам — у широкого заголовка отъедает первую и последнюю букву. */
+  align-self: flex-start;
   cursor: default;
 }
 .bookinfo-meta { flex: 1 1 16rem; min-width: 0; }
