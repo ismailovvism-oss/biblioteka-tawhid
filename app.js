@@ -3947,6 +3947,14 @@ function renderLibrary() {
   q.placeholder = 'Название, автор, тема…';
   q.value = shelfQuery;
   q.setAttribute('aria-label', 'Поиск по полке');
+  /* Без этого Chrome считает безымянный инпут полем формы и подставляет туда
+     сохранённую почту (в разметке рядом есть #acc-email). Полка при этом
+     фильтруется по чужой строке и выглядит пустой — «книги пропали».
+     У всех полей поиска в index.html autocomplete="off" стоит; это строится
+     в JS, и про него забыли. */
+  q.autocomplete = 'off';
+  q.spellcheck = false;
+  q.setAttribute('enterkeyhint', 'search');
 
   const sort = document.createElement('select');
   sort.className = 'shelf-sort';
