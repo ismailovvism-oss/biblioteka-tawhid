@@ -72,6 +72,36 @@
       "era": "Современность"
     },
     {
+      "id": "tavil",
+      "base": "books/tavil/",
+      "title": {
+        "ru": "Хукм ашаритов"
+      },
+      "category": "aqida-iman-kufr",
+      "review": "approved",
+      "progress": "ready",
+      "genre": [
+        "Исследование",
+        "Рудуд"
+      ],
+      "authors": [
+        "Исмаил Абу Хаммад"
+      ],
+      "langs": [
+        "ru"
+      ],
+      "tags": [
+        "тавиль",
+        "такфир",
+        "сыфаты",
+        "улувв",
+        "ашариты",
+        "джахмиты"
+      ],
+      "cover": "books/tavil/cover.jpg",
+      "era": "Современность"
+    },
+    {
       "id": "_sample-en",
       "base": "books/_sample-en/",
       "title": {
