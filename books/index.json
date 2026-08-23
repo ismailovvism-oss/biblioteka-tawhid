@@ -25,27 +25,6 @@
       "era": "Современность"
     },
     {
-      "id": "hukm_majlis",
-      "base": "books/hukm_majlis/",
-      "title": {
-        "ru": "Хукм пребывания в маджлисе куфра и харама"
-      },
-      "langs": [
-        "ar",
-        "ru"
-      ],
-      "category": "aqida-iman-kufr",
-      "tags": [
-        "уаля",
-        "маджлис"
-      ],
-      "authors": [
-        "Исмаил Абу Хаммад"
-      ],
-      "progress": "wip",
-      "review": "approved"
-    },
-    {
       "id": "libas",
       "base": "books/libas/",
       "title": {
