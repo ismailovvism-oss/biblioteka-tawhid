@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 660 400" width="660" height="400"><defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#a8862f"/></marker></defs><rect width="660" height="400" fill="#ffffff"/>
+<path d="M234.5,346.0 A96,96 0 0 1 425.5,346.0" fill="none" stroke="#c3bbaa" stroke-width="1.5"/>
+<path d="M153.0,337.4 A178,178 0 0 1 507.0,337.4" fill="none" stroke="#a8862f" stroke-width="2.8"/>
+<circle cx="330" cy="356" r="25" fill="#f2efe7" stroke="#a89f92" stroke-width="1.2"/>
+<text x="330" y="360" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="12" fill="#2b2622">земля</text>
+<text x="330" y="278" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="12" fill="#6b6259">небеса</text>
+<text x="330" y="168" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="13" fill="#8a6c20" font-weight="bold">АРШ — верхняя граница всего сотворённого</text>
+<line x1="307.0" y1="336.7" x2="196.7" y2="244.2" stroke="#a8862f" stroke-width="1.7" marker-end="url(#a)"/>
+<text x="181" y="231" text-anchor="end" font-family="Georgia, 'Times New Roman', serif" font-size="12" fill="#8a6c20">Мекка: вверх</text>
+<line x1="353.0" y1="336.7" x2="463.3" y2="244.2" stroke="#a8862f" stroke-width="1.7" marker-end="url(#a)"/>
+<text x="479" y="231" text-anchor="start" font-family="Georgia, 'Times New Roman', serif" font-size="12" fill="#8a6c20">Мельбурн: вверх</text>
+<text x="330" y="34" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="12.5" fill="#2b2622" font-style="italic">За Аршем нет «дальше»: ни места, ни времени, ни сторон —</text>
+<text x="330" y="53" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="12.5" fill="#2b2622" font-style="italic">они кончаются вместе с творением.</text>
+<text x="330" y="72" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="12.5" fill="#2b2622" font-style="italic">Это не другое место, а отсутствие всякого места.</text>
+<text x="330" y="391" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#6b6259" font-style="italic">Руки подняты в противоположные стороны, а линии упираются в одно и то же — в край сотворённого</text>
+</svg>
