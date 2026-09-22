@@ -81,6 +81,35 @@
       "era": "Современность"
     },
     {
+      "id": "muha",
+      "base": "books/muha/",
+      "title": {
+        "ru": "Муха, приведшая в Огонь"
+      },
+      "category": "aqida-iman-kufr",
+      "review": "approved",
+      "progress": "ready",
+      "genre": [
+        "Исследование"
+      ],
+      "authors": [
+        "Исмаил Абу Хаммад"
+      ],
+      "langs": [
+        "ru"
+      ],
+      "tags": [
+        "тавиль",
+        "икрах",
+        "иман",
+        "куфр",
+        "такфир",
+        "асар"
+      ],
+      "era": "Современность",
+      "cover": "books/muha/cover.jpg"
+    },
+    {
       "id": "_sample-en",
       "base": "books/_sample-en/",
       "title": {
