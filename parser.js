@@ -112,6 +112,46 @@ function renderTable(head, sep, body) {
   return '<div class="table-wrap"><table>' + thead + tbody + '</table></div>';
 }
 
+/*
+ * Листалка (SPEC 3.4d): callout `> [!slides] Заголовок` со строками `> ![подпись](media/…)`
+ * — кадры объяснения, которые листаются свайпом/стрелками, как альбом в Telegram или
+ * визуальный тафсир. Заголовок необязателен. Прочие строки callout’а (не картинки)
+ * идут обычным текстом под листалкой. В Obsidian тот же текст показывается callout’ом
+ * с картинками столбиком — разметка не ломается и вне читалки.
+ *
+ * Что это не просто картинка, видно сразу: край следующего кадра выглядывает справа,
+ * в углу счётчик «1 / N», под кадром точки. Оживляет app.js (блок «ЛИСТАЛКА»).
+ */
+function renderSlides(title, body, base) {
+  const frames = [], rest = [];
+  for (const raw of body) {
+    const im = raw.trim().match(IMG_RE);
+    if (im && safeImgSrc(im[2])) frames.push({ src: base + im[2], cap: im[1].trim() });
+    else if (raw.trim()) rest.push(raw);
+  }
+  if (!frames.length) return renderBlocks(rest, base).join('');
+  const n = frames.length;
+  const slides = frames.map((f, k) => '<figure class="sl-slide" data-k="' + k + '">'
+    + '<img src="' + escapeHtml(f.src) + '" alt="' + escapeHtml(f.cap) + '" loading="lazy" draggable="false">'
+    + (f.cap ? '<figcaption>' + inlineMd(f.cap) + '</figcaption>' : '')
+    + '</figure>').join('');
+  const dots = n > 1
+    ? '<div class="sl-dots">' + frames.map((f, k) => '<button class="sl-dot" type="button" data-go="' + k + '"'
+      + ' aria-label="Кадр ' + (k + 1) + '"' + (k === 0 ? ' aria-current="true"' : '') + '></button>').join('') + '</div>'
+    : '';
+  return '<div class="slides' + (n > 1 ? '' : ' sl-one') + '" data-n="' + n + '" tabindex="0"'
+    + ' aria-roledescription="листалка" aria-label="' + escapeHtml(title || 'Листалка') + ', кадров: ' + n + '">'
+    + (title ? '<div class="sl-title">' + inlineMd(title) + '</div>' : '')
+    + '<div class="sl-stage">'
+    + '<div class="sl-track" dir="ltr">' + slides + '</div>'
+    + (n > 1 ? '<button class="sl-nav sl-prev" type="button" data-step="-1" aria-label="Предыдущий кадр" disabled>‹</button>'
+      + '<button class="sl-nav sl-next" type="button" data-step="1" aria-label="Следующий кадр">›</button>'
+      + '<span class="sl-count">1 / ' + n + '</span>' : '')
+    + '<button class="sl-full" type="button" aria-label="Во весь экран" title="Во весь экран">⤢</button>'
+    + '</div>' + dots + '</div>'
+    + (rest.length ? renderBlocks(rest, base).join('') : '');
+}
+
 function renderBlocks(lines, base) {
   base = base || '';
   const isQuote = l => /^>\s?/.test(l);
@@ -158,6 +198,10 @@ function renderBlocks(lines, base) {
       while (i < lines.length && isQuote(lines[i])) { run.push(lines[i].replace(/^>\s?/, '')); i++; }
       // [!тип] статичный, [!тип]+ сворачиваемый (раскрыт), [!тип]- сворачиваемый (свёрнут)
       const m = run[0] && run[0].match(/^\[!([\w-]+)\]([+-]?)\s*(.*)$/);
+      if (m && /^slides$/i.test(m[1])) {
+        out.push(renderSlides((m[3] || '').trim(), run.slice(1), base));
+        continue;
+      }
       if (m) {
         const type = m[1].toLowerCase();
         const fold = m[2];   // '+' раскрыт, '-' свёрнут, '' не сворачивается

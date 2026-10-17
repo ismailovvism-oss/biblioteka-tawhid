@@ -505,6 +505,94 @@ window.addEventListener('scroll', () => {
 }, { passive: true });
 window.addEventListener('resize', () => { applyLayout(); updateActive(); });
 
+/* ===== ЛИСТАЛКА: > [!slides] (разметка — parser.js renderSlides) =====
+ * Лента — родная прокрутка со щелчком по кадрам (CSS), здесь только кнопки, точки,
+ * счётчик и «во весь экран». Состояние кадра не храним: номер всегда считается из
+ * scrollLeft, поэтому листалка переживает перерисовку главы без забот.
+ * Свайп внутри листалки главу не листает (см. touchstart свайпа глав). */
+function slidesIndex(box) {
+  const tr = box.querySelector('.sl-track');
+  const first = tr.children[0], second = tr.children[1];
+  const step = second ? second.offsetLeft - first.offsetLeft : tr.clientWidth;
+  // у последнего кадра прокрутка упирается в край раньше, чем на целый шаг
+  if (tr.scrollLeft >= tr.scrollWidth - tr.clientWidth - 2) return tr.children.length - 1;
+  return Math.max(0, Math.round(tr.scrollLeft / (step || 1)));
+}
+function slidesGo(box, i) {
+  const tr = box.querySelector('.sl-track');
+  const n = tr.children.length;
+  i = Math.max(0, Math.min(n - 1, i));
+  tr.scrollTo({ left: tr.children[i].offsetLeft - tr.children[0].offsetLeft });
+}
+function slidesSync(box) {
+  const n = +box.dataset.n || 1;
+  const i = slidesIndex(box);
+  // высота ленты — по текущему кадру (иначе её задаёт самый высокий кадр, и под
+  // альбомной картинкой зияет пустота); стрелки — по середине картинки
+  const tr = box.querySelector('.sl-track'), sl = tr.children[i], img = sl && sl.querySelector('img');
+  // кадр ещё грузится — не мерить пустую картинку (лента схлопнулась бы до подписи)
+  const готов = img && img.complete && img.naturalWidth > 0;
+  tr.style.height = готов && sl.offsetHeight ? sl.offsetHeight + 'px' : '';
+  if (готов) box.style.setProperty('--sl-mid', (img.offsetHeight / 2) + 'px');
+  const cnt = box.querySelector('.sl-count');
+  if (cnt) cnt.textContent = (i + 1) + ' / ' + n;
+  const prev = box.querySelector('.sl-prev'), next = box.querySelector('.sl-next');
+  if (prev) prev.disabled = i === 0;
+  if (next) next.disabled = i === n - 1;
+  box.querySelectorAll('.sl-dot').forEach((d, k) => d.setAttribute('aria-current', String(k === i)));
+}
+function slidesFull(box, on) {
+  const i = slidesIndex(box);
+  box.classList.toggle('sl-full-on', on);
+  document.body.classList.toggle('sl-full-open', on);
+  const b = box.querySelector('.sl-full');
+  if (b) { b.textContent = on ? '✕' : '⤢'; b.setAttribute('aria-label', on ? 'Свернуть' : 'Во весь экран'); }
+  // ширина кадра поменялась — вернуть тот же кадр на место без анимации
+  const tr = box.querySelector('.sl-track');
+  tr.style.scrollBehavior = 'auto';
+  tr.scrollLeft = tr.children[i].offsetLeft - tr.children[0].offsetLeft;
+  tr.style.scrollBehavior = '';
+  slidesSync(box);
+  if (on) box.focus({ preventScroll: true });
+}
+// scroll не всплывает — ловим на погружении
+document.addEventListener('scroll', e => {
+  const tr = e.target;
+  if (tr && tr.classList && tr.classList.contains('sl-track')) slidesSync(tr.closest('.slides'));
+}, true);
+// картинки грузятся лениво: высоту листалки уточняем, когда кадр пришёл (load не всплывает)
+document.addEventListener('load', e => {
+  const img = e.target;
+  if (img && img.tagName === 'IMG' && img.closest('.sl-slide')) slidesSync(img.closest('.slides'));
+}, true);
+window.addEventListener('resize', () => document.querySelectorAll('.slides').forEach(slidesSync));
+// стрелки ←/→ листают кадры, пока листалка в фокусе или раскрыта; Esc — свернуть.
+// Погружение: иначе общий обработчик клавиш успел бы перелистнуть главу
+document.addEventListener('keydown', e => {
+  const box = document.querySelector('.slides.sl-full-on')
+    || (document.activeElement && document.activeElement.closest && document.activeElement.closest('.slides'));
+  if (!box) return;
+  if (e.key === 'Escape' && box.classList.contains('sl-full-on')) {
+    e.preventDefault(); e.stopPropagation(); slidesFull(box, false); return;
+  }
+  if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+  e.preventDefault(); e.stopPropagation();
+  slidesGo(box, slidesIndex(box) + (e.key === 'ArrowRight' ? 1 : -1));
+}, true);
+// true — нажатие разобрано листалкой
+function slidesClick(e) {
+  const box = e.target.closest('.slides');
+  if (!box) return false;
+  const full = e.target.closest('.sl-full');
+  if (full) { slidesFull(box, !box.classList.contains('sl-full-on')); return true; }
+  const step = e.target.closest('.sl-nav');
+  if (step) { slidesGo(box, slidesIndex(box) + Number(step.dataset.step)); return true; }
+  const dot = e.target.closest('.sl-dot');
+  if (dot) { slidesGo(box, Number(dot.dataset.go)); return true; }
+  if (e.target.closest('.sl-slide img') && !box.classList.contains('sl-full-on')) { slidesFull(box, true); return true; }
+  return false;
+}
+
 /* ===== сноски: две механики над одним источником ===== */
 function findPairElBack(el) {
   // ближайшая .pair: сам элемент или предыдущие соседи (для клика внутри .fn-inline)
@@ -513,6 +601,7 @@ function findPairElBack(el) {
 }
 
 stream.addEventListener('click', e => {
+  if (slidesClick(e)) return;
   // подписанное слово: показать, что за лемма, и дать убрать её из роя.
   // Проверяем первым — обёртка слова лежит глубже подкраски пометки
   const gw = e.target.closest('span.gl');
@@ -3017,6 +3106,8 @@ function scrollRoom(el) {
 let swipeX = null, swipeY = null, swipeT = 0, swipeRoom = null;
 document.addEventListener('touchstart', e => {
   if (e.touches.length !== 1) { swipeX = null; return; }
+  // листалка: жест целиком её — даже на последнем кадре главу не перелистываем
+  if (e.target.closest && e.target.closest('.slides')) { swipeX = null; return; }
   swipeX = e.touches[0].clientX;
   swipeY = e.touches[0].clientY;
   swipeT = Date.now();

@@ -81,6 +81,34 @@
       "era": "Современность"
     },
     {
+      "id": "fatiha",
+      "base": "books/fatiha/",
+      "title": {
+        "ru": "Фатиха за имамом"
+      },
+      "category": "fiqh-ibadat",
+      "review": "approved",
+      "progress": "ready",
+      "genre": [
+        "Исследование"
+      ],
+      "authors": [
+        "Исмаил Абу Хаммад"
+      ],
+      "langs": [
+        "ru"
+      ],
+      "tags": [
+        "фикх/намаз/фатиха",
+        "фикх/намаз/кыраат",
+        "фикх/намаз/джамаат/имам",
+        "усуль/хукм/ваджиб",
+        "усуль/хукм/рукн"
+      ],
+      "era": "Современность",
+      "cover": "books/fatiha/cover.jpg"
+    },
+    {
       "id": "muha",
       "base": "books/muha/",
       "title": {

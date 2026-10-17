@@ -240,6 +240,77 @@ body[data-align="justify"] .member p { text-align: justify; }
   margin-top: 0.35em; font-size: 0.85em; color: var(--muted);
   text-align: center; line-height: 1.35;
 }
+
+/* листалка: > [!slides] + строки-картинки (parser.js renderSlides, app.js «ЛИСТАЛКА»).
+   Лента — родная горизонтальная прокрутка со щелчком по кадрам: свайп на телефоне
+   плавный «из коробки». Кадр уже ленты (88 %) — край следующего выглядывает, и сразу
+   видно, что это не одна картинка. */
+.member .slides { margin: 0.9em 0; position: relative; outline: none; }
+.member .slides .sl-title {
+  font-size: 0.9em; font-weight: 600; color: var(--muted);
+  margin-bottom: 0.4em; text-align: center;
+}
+.member .sl-stage { position: relative; }
+.member .sl-track {
+  display: flex; align-items: flex-start; gap: 10px; overflow-x: auto; overflow-y: hidden;
+  overscroll-behavior-x: contain; transition: height 0.25s ease;
+  scroll-snap-type: x mandatory; scroll-behavior: smooth;
+  scrollbar-width: none; -webkit-overflow-scrolling: touch;
+}
+.member .sl-track::-webkit-scrollbar { display: none; }
+.member .sl-slide {
+  flex: 0 0 88%; margin: 0; scroll-snap-align: start; scroll-snap-stop: always;
+  text-align: center;
+}
+.member .sl-slide:last-child { scroll-snap-align: end; }
+.member .sl-one .sl-slide { flex-basis: 100%; }
+.member .sl-slide img {
+  display: block; width: auto; height: auto; max-width: 100%; max-height: min(70vh, 70dvh); margin: 0 auto;
+  border-radius: 8px; border: 1px solid var(--border); background: #fff;
+  cursor: zoom-in; user-select: none; -webkit-user-drag: none;
+}
+.member .sl-slide figcaption {
+  margin-top: 0.4em; font-size: 0.85em; color: var(--muted); line-height: 1.35;
+}
+.member .sl-nav, .member .sl-full {
+  position: absolute; z-index: 2; border: 0; padding: 0; cursor: pointer;
+  width: 38px; height: 38px; border-radius: 50%;
+  background: rgba(0, 0, 0, 0.5); color: #fff; font-size: 24px; line-height: 38px;
+  display: grid; place-items: center;
+}
+.member .sl-nav { top: var(--sl-mid, 50%); transform: translateY(-50%); }
+.member .sl-prev { left: 6px; }
+.member .sl-next { right: 6px; }
+.member .sl-nav:disabled { opacity: 0; pointer-events: none; }
+.member .sl-full { top: 8px; left: 8px; font-size: 17px; width: 32px; height: 32px; }
+.member .sl-count {
+  position: absolute; top: 8px; right: 8px; z-index: 2; pointer-events: none;
+  padding: 0.15em 0.6em; border-radius: 999px; background: rgba(0, 0, 0, 0.6);
+  color: #fff; font-size: 0.78em; font-variant-numeric: tabular-nums;
+}
+.member .sl-dots { display: flex; justify-content: center; gap: 2px; margin-top: 0.3em; }
+.member .sl-dot {
+  width: 20px; height: 20px; border: 0; padding: 0; background: none; cursor: pointer;
+  display: grid; place-items: center;
+}
+.member .sl-dot::before {
+  content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--border);
+}
+.member .sl-dot[aria-current="true"]::before { background: var(--accent); }
+.member .slides:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+/* во весь экран: класс, а не Fullscreen API (iPhone не даёт его элементу) */
+.member .slides.sl-full-on {
+  position: fixed; inset: 0; z-index: 3000; margin: 0; padding: 12px 0;
+  background: #0b0b0b; display: flex; flex-direction: column; justify-content: center;
+}
+.member .sl-full-on .sl-title, .member .sl-full-on .sl-slide figcaption { color: #ddd; }
+.member .sl-full-on .sl-slide { flex-basis: 100%; }
+.member .sl-full-on .sl-slide img {
+  max-height: calc(100vh - 140px); max-height: calc(100dvh - 140px); border: 0;
+  cursor: default;
+}
+body.sl-full-open { overflow: hidden; }
+@media (prefers-reduced-motion: reduce) { .member .sl-track { scroll-behavior: auto; transition: none; } }
 /* сворачиваемые callout’ы: [!тип]+ (раскрыт) / [!тип]- (свёрнут) */
 .member details.callout-foldable > summary.callout-title {
   cursor: pointer; list-style: none; user-select: none;
