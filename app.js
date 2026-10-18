@@ -421,6 +421,7 @@ function renderChapter() {
     stream.appendChild(note);
   }
   applyVisibility();
+  $('#btn-comic').hidden = !(book.view === 'comic' || stream.querySelector('.slides, figure.fig'));
   // проверяем ДО снятия: иначе режим «без огласовок» сам бы и спрятал свой переключатель
   const естьТашкиль = естьОгласовки(stream.textContent);
   if (settings.noTashkil) снятьТашкиль(stream);   // до сверки: она считает по показанному тексту
@@ -634,6 +635,13 @@ function slidesClick(e) {
   const box = e.target.closest('.slides');
   if (!box) return false;
   const full = e.target.closest('.sl-full');
+  const tapImg = e.target.closest('.sl-slide img') && !box.classList.contains('sl-full-on');
+  if ((full || tapImg) && book && book.view === 'comic') {
+    // один полноэкранный режим на книгу-комикс: комикс с этого же кадра, с переходом между главами
+    const tr = box.querySelector('.sl-track'), img = tr.children[slidesIndex(box)].querySelector('img');
+    openComic(chapterIndex, img ? img.getAttribute('src') : 0);
+    return true;
+  }
   if (full) { slidesFull(box, !box.classList.contains('sl-full-on')); return true; }
   const step = e.target.closest('.sl-nav');
   if (step) { slidesGo(box, slidesIndex(box) + Number(step.dataset.step)); return true; }
@@ -642,6 +650,179 @@ function slidesClick(e) {
   if (e.target.closest('.sl-slide img') && !box.classList.contains('sl-full-on')) { slidesFull(box, true); return true; }
   return false;
 }
+
+/* ===== КОМИКС: книга кадр за кадром во весь экран (SPEC 3.4e) =====
+ * Включается в book.json: "view": "comic" — книга открывается сразу в этом режиме;
+ * у прочих книг с картинками его можно открыть кнопкой «▶ Листать».
+ * Кадры берутся из уже отрисованной главы, отдельного формата нет: кадр листалки и
+ * иллюстрация — кадр-картинка с подписью; текст между ними — кадр-карточка (короткие
+ * абзацы сливаются); начало главы — титульный кадр. Сноски в комикс не идут.
+ * Главы стыкуются: за последним кадром главы — первый следующей. Место — {chapter, frame}. */
+const comic = { ci: 0, i: 0, frames: [], start: new Map(), order: [], total: 0 };
+const comicCache = new Map();     // ci → кадры (на время открытой книги)
+function comicLang() {
+  return settings.visibility !== 'both' ? visibleLang() : book.languages[book.languages.length > 1 ? 1 : 0];
+}
+async function comicFrames(ci) {
+  if (comicCache.has(ci)) return comicCache.get(ci);
+  const data = await loadChapterData(ci);
+  const lang = comicLang();
+  const frames = [];
+  if (book.chapters.length > 1) frames.push({ t: 'title', ci });
+  let buf = [], len = 0;
+  const flush = () => { if (buf.length) frames.push({ t: 'text', html: buf.join('') }); buf = []; len = 0; };
+  const pushImg = fig => {
+    const img = fig.querySelector('img'); if (!img) return;
+    const cap = fig.querySelector('figcaption');
+    frames.push({ t: 'img', src: img.getAttribute('src'), alt: img.getAttribute('alt') || '', cap: cap ? cap.innerHTML : '' });
+  };
+  const div = document.createElement('div');
+  for (const pair of data.pairs) {
+    if (pair.type !== 'text' || !pair[lang]) continue;
+    div.innerHTML = pair[lang];
+    div.querySelectorAll('.fnref').forEach(b => b.remove());       // сносок в комиксе нет
+    for (const el of [...div.children]) {
+      const figs = el.matches('figure') ? [el] : [...el.querySelectorAll('figure.sl-slide, figure.fig')];
+      if (figs.length) {
+        flush();
+        if (el.classList.contains('slides')) {               // заголовок листалки — карточкой перед кадрами
+          const tt = el.querySelector('.sl-title');
+          const same = tt && tt.textContent.trim() === pickTitle(book.chapters[ci].title).trim();   // не повторять титул главы
+          if (tt && !same) frames.push({ t: 'text', html: '<h3>' + tt.innerHTML + '</h3>' });
+        }
+        figs.forEach(pushImg);
+        continue;
+      }
+      if (!el.textContent.trim()) continue;
+      buf.push(el.outerHTML); len += el.textContent.length;
+      if (len > 650) flush();
+    }
+    if (len > 380) flush();
+  }
+  flush();
+  comicCache.set(ci, frames);
+  return frames;
+}
+function comicOpen() { return !$('#comic').hidden; }
+function comicRender() {
+  const f = comic.frames[comic.i]; if (!f) return;
+  const st = $('#cm-stage');
+  st.innerHTML = '';
+  let cap = '';
+  if (f.t === 'img') {
+    const img = document.createElement('img');
+    img.src = f.src; img.alt = f.alt; img.draggable = false;
+    st.appendChild(img); cap = f.cap;
+  } else if (f.t === 'title') {
+    const d = document.createElement('div'); d.className = 'cm-title';
+    d.innerHTML = '<small></small><h2></h2>';
+    d.querySelector('small').textContent = pickTitle(book.title);
+    d.querySelector('h2').textContent = pickTitle(book.chapters[f.ci].title);
+    st.appendChild(d);
+  } else {
+    const d = document.createElement('div'); d.className = 'cm-text member';
+    d.setAttribute('lang', comicLang()); d.dir = book.rtl.includes(comicLang()) ? 'rtl' : 'ltr';
+    d.innerHTML = f.html; st.appendChild(d);
+  }
+  $('#cm-cap').innerHTML = cap;
+  const g = (comic.start.get(comic.ci) || 0) + comic.i;            // номер кадра в книге
+  $('#cm-count').textContent = (g + 1) + ' / ' + comic.total;
+  const rg = $('#cm-range'); rg.max = String(comic.total); rg.value = String(g + 1);
+  $('#cm-ch').value = String(comic.ci);
+  $('#cm-prev').disabled = comic.i === 0 && nextReadable(comic.ci, -1) < 0;
+  $('#cm-next').disabled = comic.i === comic.frames.length - 1 && nextReadable(comic.ci, 1) < 0;
+  const nx = comic.frames[comic.i + 1];                       // подгрузить следующий кадр заранее
+  if (nx && nx.t === 'img') { const pre = new Image(); pre.src = nx.src; }
+  setLast(bookId, { chapter: comic.ci, frame: comic.i }); saveSettings();
+}
+async function comicGoto(ci, i) {
+  comic.frames = await comicFrames(ci);
+  if (!comic.frames.length) comic.frames = [{ t: 'title', ci }];
+  comic.ci = ci;
+  comic.i = i === 'last' ? comic.frames.length - 1 : Math.max(0, Math.min(i | 0, comic.frames.length - 1));
+  comicRender();
+}
+async function comicStep(d) {
+  const j = comic.i + d;
+  if (j >= 0 && j < comic.frames.length) { comic.i = j; comicRender(); return; }
+  const nci = nextReadable(comic.ci, d > 0 ? 1 : -1);
+  if (nci >= 0) await comicGoto(nci, d > 0 ? 0 : 'last');
+}
+/* Кадры всех глав — сразу: сквозной счёт «кадр N из всех» и ползунок по всей книге.
+   Главы — это маленькие .md (а картинки грузятся только при показе), так что дёшево. */
+async function comicIndex() {
+  comic.start.clear(); comic.order = []; let n = 0;
+  for (let k = 0; k < book.chapters.length; k++) {
+    if (!chHasFile(book.chapters[k])) continue;
+    let fr; try { fr = await comicFrames(k); } catch { fr = []; }
+    comic.start.set(k, n); comic.order.push([k, n, fr.length || 1]); n += fr.length || 1;
+  }
+  comic.total = n;
+}
+// at — номер кадра в главе, 'last', или src картинки (открыть на этом кадре листалки)
+async function openComic(ci, at) {
+  const sel = $('#cm-ch'); sel.innerHTML = '';
+  book.chapters.forEach((ch, k) => {
+    if (!chHasFile(ch)) return;
+    const o = document.createElement('option'); o.value = String(k); o.textContent = pickTitle(ch.title); sel.appendChild(o);
+  });
+  openOverlay($('#comic'));
+  document.body.classList.add('comic-open');
+  await comicIndex();
+  if (typeof at === 'string' && at !== 'last') {
+    const fr = await comicFrames(ci);
+    at = Math.max(0, fr.findIndex(f => f.t === 'img' && f.src === at));
+  }
+  await comicGoto(ci, at);
+}
+function comicGlobal(g) {        // сквозной номер → [глава, кадр]
+  for (const [k, s, len] of comic.order) if (g < s + len) return [k, g - s];
+  const last = comic.order[comic.order.length - 1]; return [last[0], last[2] - 1];
+}
+function closeComic(fromUi) {
+  $('#comic').hidden = true;
+  document.body.classList.remove('comic-open');
+  if (fromUi) consumeOverlayMark();
+  if (book && comic.ci !== chapterIndex) loadChapter(comic.ci);   // текст — на той главе, где листали
+}
+$('#btn-comic').addEventListener('click', () => {
+  const last = getLast(bookId) || {};
+  openComic(chapterIndex, last.chapter === chapterIndex ? last.frame || 0 : 0);
+});
+$('#cm-close').addEventListener('click', () => closeComic(true));
+$('#cm-prev').addEventListener('click', () => comicStep(-1));
+$('#cm-next').addEventListener('click', () => comicStep(1));
+$('#cm-ch').addEventListener('change', e => comicGoto(Number(e.target.value), 0));
+$('#cm-range').addEventListener('input', e => {
+  const [k, i] = comicGlobal(Number(e.target.value) - 1);
+  if (k === comic.ci) { comic.i = i; comicRender(); } else comicGoto(k, i);
+});
+// тап: левая треть — назад, остальное — вперёд (по карточке текста тап не листает — её читают)
+$('#cm-stage').addEventListener('click', e => {
+  if (e.target.closest('.cm-text') || !window.getSelection().isCollapsed) return;
+  const r = $('#cm-stage').getBoundingClientRect();
+  comicStep(e.clientX - r.left < r.width / 3 ? -1 : 1);
+});
+{
+  let x0 = null, y0 = 0;
+  $('#comic').addEventListener('touchstart', e => {
+    if (e.touches.length !== 1 || e.target.closest('input, select')) { x0 = null; return; }
+    x0 = e.touches[0].clientX; y0 = e.touches[0].clientY;
+  }, { passive: true });
+  $('#comic').addEventListener('touchend', e => {
+    if (x0 == null) return;
+    const t = e.changedTouches[0], dx = t.clientX - x0, dy = t.clientY - y0; x0 = null;
+    if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.4) comicStep(dx < 0 ? 1 : -1);
+  }, { passive: true });
+}
+// клавиши — на погружении, раньше обработчика глав и листалки
+document.addEventListener('keydown', e => {
+  if (!comicOpen()) return;
+  const k = e.key;
+  if (k === 'Escape') { e.preventDefault(); e.stopPropagation(); closeComic(true); return; }
+  if (k === 'ArrowRight' || k === 'PageDown' || (k === ' ' && !e.target.closest?.('select'))) { e.preventDefault(); e.stopPropagation(); comicStep(1); }
+  else if (k === 'ArrowLeft' || k === 'PageUp') { e.preventDefault(); e.stopPropagation(); comicStep(-1); }
+}, true);
 
 /* ===== сноски: две механики над одним источником ===== */
 function findPairElBack(el) {
@@ -3109,10 +3290,11 @@ $('#page-form').addEventListener('submit', e => {
 
 /* ===== клавиатура: стрелки — главы, Esc — закрыть ===== */
 function anyPopupOpen() {
-  return [...document.querySelectorAll('.overlay')].some(o => !o.hidden) ||
+  return [...document.querySelectorAll('.overlay')].some(o => !o.hidden) || !$('#comic').hidden ||
     !$('#img-overlay').hidden || !$('#page-popover').hidden;
 }
 function closeTopPopup() {
+  if (!$('#comic').hidden) { closeComic(false); return true; }
   if (!$('#img-overlay').hidden) { $('#img-overlay').hidden = true; return true; }
   if (!$('#page-popover').hidden) { $('#page-popover').hidden = true; return true; }
   let closed = false;
@@ -4016,6 +4198,7 @@ function renderBookList(shown, view, host) {
 }
 
 function renderLibrary() {
+  if (!$('#comic').hidden) { $('#comic').hidden = true; document.body.classList.remove('comic-open'); }
   document.body.dataset.view = 'library';
   if (mtModeOn()) setMtMode(false);   // режим перевода живёт только внутри книги
   book = null;
@@ -4346,6 +4529,7 @@ async function openBook(entry, opts = {}) {
   base = entry.base.endsWith('/') ? entry.base : entry.base + '/';
   privateBook = entry.private === true;   // непубличная книга → путь через бакет
   chapterCache.clear();
+  comicCache.clear();
   document.body.dataset.view = 'reading';
   $('#chapter-title').textContent = 'Загрузка…';
   try {
@@ -4381,10 +4565,11 @@ async function openBook(entry, opts = {}) {
     if (ci >= 0) { await loadChapter(ci, opts.sector); return; }
     toast(`Сектор ${opts.sector} не найден`);
   }
-  if (opts.fromStart) { await loadChapter(0); return; }
+  if (opts.fromStart) { await loadChapter(0); if (book.view === 'comic') openComic(chapterIndex, 0); return; }
   const last = getLast(bookId);
   const ci = last && Number.isInteger(last.chapter) ? last.chapter : 0;
   await loadChapter(Math.min(Math.max(ci, 0), book.chapters.length - 1), last ? last.sector : null);
+  if (book.view === 'comic') openComic(chapterIndex, last && last.chapter === chapterIndex ? last.frame || 0 : 0);
 }
 
 async function chapterOfSector(secId) {

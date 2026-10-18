@@ -65,6 +65,23 @@
   <button id="btn-next" type="button" title="Следующая глава" aria-label="Следующая глава"><span class="nav-lbl">Далее </span>›</button>
 </footer>
 
+<!-- режим «комикс» (SPEC 3.4e): книга кадр за кадром во весь экран; app.js, блок «КОМИКС» -->
+<button id="btn-comic" type="button" hidden title="Листать книгу кадрами">▶ Листать</button>
+<div id="comic" hidden aria-roledescription="комикс">
+  <div class="cm-top">
+    <button id="cm-close" type="button" title="К тексту книги" aria-label="К тексту книги">✕</button>
+    <select id="cm-ch" aria-label="Глава"></select>
+    <span id="cm-count"></span>
+  </div>
+  <div id="cm-stage"></div>
+  <div id="cm-cap"></div>
+  <div class="cm-nav">
+    <button id="cm-prev" type="button" aria-label="Назад">‹</button>
+    <input id="cm-range" type="range" min="1" max="1" value="1" aria-label="Перейти к кадру">
+    <button id="cm-next" type="button" aria-label="Дальше">›</button>
+  </div>
+</div>
+
 <div id="page-popover" hidden>
   <form id="page-form">
     <input id="page-input" type="number" min="1" inputmode="numeric" placeholder="№ страницы">

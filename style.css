@@ -1697,3 +1697,60 @@ mark.mtsel {
   color: var(--warn, #a2662a);
   margin-top: .15rem;
 }
+
+/* ===== режим «комикс» (SPEC 3.4e): книга кадр за кадром во весь экран ===== */
+#comic {
+  position: fixed; inset: 0; z-index: 2500; background: #141414; color: #ece6da;
+  display: flex; flex-direction: column; user-select: none;
+}
+#comic[hidden], #btn-comic[hidden] { display: none; }
+body.comic-open { overflow: hidden; }
+.cm-top { display: flex; align-items: center; gap: 10px; padding: 8px 12px; }
+#cm-close, #cm-prev, #cm-next {
+  border: 0; background: rgba(255,255,255,0.1); color: #fff; cursor: pointer;
+  width: 42px; height: 42px; border-radius: 50%; font-size: 22px; line-height: 1; flex: 0 0 auto;
+}
+#cm-close:hover, #cm-prev:hover, #cm-next:hover { background: rgba(255,255,255,0.2); }
+#cm-prev:disabled, #cm-next:disabled { opacity: 0.25; cursor: default; }
+#cm-ch {
+  flex: 1; min-width: 0; background: rgba(255,255,255,0.08); color: #ece6da;
+  border: 1px solid rgba(255,255,255,0.15); border-radius: 10px; padding: 8px 10px; font: inherit; font-size: 0.95rem;
+}
+#cm-ch option { color: #111; }
+#cm-count { font-size: 0.85rem; color: #a9a196; font-variant-numeric: tabular-nums; white-space: nowrap; }
+#cm-stage {
+  flex: 1; min-height: 0; display: grid; place-items: center; padding: 6px 10px; position: relative;
+  touch-action: pan-y; cursor: pointer;
+}
+#cm-stage > * { animation: cmIn 0.22s ease; }
+@keyframes cmIn { from { opacity: 0; } to { opacity: 1; } }
+#cm-stage img {
+  max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px; display: block;
+  -webkit-user-drag: none;
+}
+.cm-text {
+  width: min(100%, 40rem); max-height: 100%; overflow-y: auto; cursor: auto;
+  background: var(--bg); color: var(--fg); border-radius: 14px;
+  padding: 1.3rem 1.5rem; font-size: 1.08rem; line-height: 1.6; user-select: text;
+}
+.cm-text > :first-child { margin-top: 0; }
+.cm-text > :last-child { margin-bottom: 0; }
+.cm-title { text-align: center; padding: 1rem; }
+.cm-title small { display: block; color: #b8a57f; letter-spacing: 0.14em; text-transform: uppercase; font-size: 0.8rem; margin-bottom: 0.8rem; }
+.cm-title h2 { margin: 0; font-size: clamp(1.6rem, 6vw, 2.4rem); line-height: 1.2; color: #f6efe1; text-wrap: balance; }
+#cm-cap {
+  text-align: center; padding: 4px 18px 2px; min-height: 2.8em; max-width: 44rem; margin: 0 auto;
+  font-size: 0.98rem; line-height: 1.4; color: #ddd5c8;
+}
+.cm-nav { display: flex; align-items: center; gap: 12px; padding: 6px 12px 14px; }
+/* ползунок по всей книге: быстро перейти к любому кадру, не листая по одному */
+#cm-range { flex: 1; min-width: 0; height: 28px; accent-color: var(--accent); cursor: pointer; }
+#btn-comic {
+  position: fixed; right: 14px; bottom: 4.2rem; z-index: 40;
+  background: var(--panel); color: var(--accent); border: 1px solid var(--border); border-radius: 999px;
+  padding: 0.5rem 0.95rem; font-weight: 600; font-size: 0.9rem; cursor: pointer;
+  box-shadow: 0 1px 6px rgba(0,0,0,0.12); opacity: 0.92;
+}
+#btn-comic:hover { opacity: 1; border-color: var(--accent); }
+body:not([data-view="reading"]) #btn-comic { display: none; }
+@media (prefers-reduced-motion: reduce) { #cm-stage > * { animation: none; } }

@@ -205,6 +205,55 @@
       ],
       "review": "caution",
       "progress": "ready"
+    },
+    {
+      "id": "arab-paltsy",
+      "base": "books/arab-paltsy/",
+      "title": {
+        "ru": "Арабский на пальцах"
+      },
+      "category": "lang-nahw",
+      "review": "approved",
+      "progress": "wip",
+      "genre": [
+        "Учебник"
+      ],
+      "authors": [
+        "Исмаил Абу Хаммад"
+      ],
+      "langs": [
+        "ru"
+      ],
+      "tags": [
+        "арабский/грамматика",
+        "арабский/коран"
+      ],
+      "era": "Современность",
+      "cover": "books/arab-paltsy/cover.jpg"
+    },
+    {
+      "id": "tafsir-fatiha",
+      "base": "books/tafsir-fatiha/",
+      "title": {
+        "ru": "Визуальный тафсир: Аль-Фатиха"
+      },
+      "category": "quran-tafsir",
+      "review": "approved",
+      "progress": "ready",
+      "genre": [
+        "Тафсир"
+      ],
+      "authors": [
+        "аль-Касави"
+      ],
+      "langs": [
+        "ru"
+      ],
+      "tags": [
+        "коран/тафсир/фатиха"
+      ],
+      "era": "Современность",
+      "cover": "books/tafsir-fatiha/cover.jpg"
     }
   ]
 }

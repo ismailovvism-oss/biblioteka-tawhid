@@ -252,6 +252,11 @@ node tools/validate.js books/tawfiq
   Высота ленты = высота текущего кадра (`slidesSync`, по `scroll` и `load` на погружении).
   Свайп глав в `touchstart` пропускает `.slides`; ←/→ и Esc перехватываются на погружении.
   «Во весь экран» — класс `.sl-full-on` (`position: fixed`), не Fullscreen API.
+  **Режим «комикс»** (SPEC 3.4e): `"view": "comic"` в book.json; блок «КОМИКС» в `app.js`
+  (`comicFrames` строит кадры из отрисованной главы, `#comic` — свой оверлей, учтён в
+  `anyPopupOpen`/`closeTopPopup`). Проверять на Android: Waydroid + Chrome, отладка через
+  `adb forward tcp:9333 localabstract:chrome_devtools_remote`; страницу отдавать на
+  `192.168.240.1` (адрес хоста в сети Waydroid).
   Из статьи в книгу кадры несут конвертеры `tools/statya` (`в-вольт.py` → `в-читалку.py`,
   файлы → `books/<id>/media/`); как рисовать кадры — скилл `statya`, §7.1.
 
