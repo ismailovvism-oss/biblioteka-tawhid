@@ -115,18 +115,20 @@ body[data-view="library"] #progress { display: none; }
 /* переходы между главами — заметной кнопкой с подписью, а не одной стрелкой:
    автор не находил их в углах панели (18.10.2026) */
 #btn-prev, #btn-next {
-  font-size: 1rem;
+  /* видно, что это кнопка, но не кричит во время чтения: тонкая рамка, без заливки
+     (заливка «бросалась в глаза и отвлекала» — автор, 18.10.2026) */
+  font-size: 0.92rem;
   line-height: 1;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--accent);
-  background: var(--accent-soft);
-  border: 1.5px solid var(--accent);
+  background: transparent;
+  border: 1px solid var(--border);
   border-radius: 999px;
-  padding: 0.45rem 0.95rem;
+  padding: 0.4rem 0.85rem;
   white-space: nowrap;
 }
-#btn-prev:hover, #btn-next:hover { background: var(--accent); color: var(--bg); }
-#btn-prev:active, #btn-next:active { background: var(--accent); color: var(--bg); }
+#btn-prev:hover, #btn-next:hover { border-color: var(--accent); background: var(--accent-soft); }
+#btn-prev:active, #btn-next:active { border-color: var(--accent); background: var(--accent-soft); }
 
 /* конец текста главы: «Следующая глава →» с названием */
 .ch-end {
@@ -277,6 +279,8 @@ body[data-align="justify"] .member p { text-align: justify; }
   margin-bottom: 0.4em; text-align: center;
 }
 .member .sl-stage { position: relative; }
+/* ширина ленты = кадр + узкий край следующего (задаёт slidesSync через --sl-max) */
+.member .slides:not(.sl-full-on):not(.sl-one) .sl-stage { max-width: var(--sl-max, none); margin: 0 auto; }
 .member .sl-track {
   display: flex; align-items: flex-start; gap: 10px; overflow-x: auto; overflow-y: hidden;
   overscroll-behavior-x: contain; transition: height 0.25s ease;

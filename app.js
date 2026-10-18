@@ -581,6 +581,9 @@ function slidesSync(box) {
   if (готов) img.dataset.ok = '1';   // снять заглушку размера (картинка могла прийти из кеша раньше слушателя)
   tr.style.height = готов && sl.offsetHeight ? sl.offsetHeight + 'px' : '';
   if (готов) box.style.setProperty('--sl-mid', (img.offsetHeight / 2) + 'px');
+  // лента не шире «кадр + 12 %»: следующий кадр виден узкой полоской, а не полкадром
+  if (готов && !box.classList.contains('sl-full-on') && sl.offsetWidth > 40)
+    box.style.setProperty('--sl-max', Math.round(sl.offsetWidth / 0.88) + 'px');
   const cnt = box.querySelector('.sl-count');
   if (cnt) cnt.textContent = (i + 1) + ' / ' + n;
   const prev = box.querySelector('.sl-prev'), next = box.querySelector('.sl-next');
