@@ -59,10 +59,10 @@
 </div>
 
 <footer id="bottombar">
-  <button id="btn-prev" type="button" title="Предыдущая глава">‹</button>
+  <button id="btn-prev" type="button" title="Предыдущая глава" aria-label="Предыдущая глава">‹<span class="nav-lbl"> Назад</span></button>
   <button id="page-indicator" type="button" title="Перейти к странице">стр. —</button>
   <button id="btn-scan" type="button" title="Показать скан страницы" hidden>скан</button>
-  <button id="btn-next" type="button" title="Следующая глава">›</button>
+  <button id="btn-next" type="button" title="Следующая глава" aria-label="Следующая глава"><span class="nav-lbl">Далее </span>›</button>
 </footer>
 
 <div id="page-popover" hidden>
@@ -107,6 +107,13 @@
       <select id="set-fnmode">
         <option value="inline">разворот на месте</option>
         <option value="jump">скачок и возврат</option>
+      </select>
+    </label>
+    <label>Подсветка абзаца
+      <select id="set-hl">
+        <option value="auto">только в книгах с переводом</option>
+        <option value="always">всегда</option>
+        <option value="never">никогда</option>
       </select>
     </label>
     <label>Порядок пары

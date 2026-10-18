@@ -12,6 +12,7 @@ const DEFAULTS = {
   visibility: 'both',  // both | <lang> | quiz:<lang> (самопроверка: виден <lang>, второй язык по тапу)
   layout: 'auto',      // auto | v | h
   fnMode: 'inline',    // inline | jump
+  hlActive: 'auto',    // подсветка абзаца у центра экрана: auto (только в книгах с переводом) | always | never
   align: 'start',      // start | justify — выравнивание текста
   debug: false,        // панель валидатора
   swap: false,         // менять местами оригинал/перевод в паре
@@ -308,6 +309,38 @@ async function loadChapter(i, targetId) {
   updateActive();
 }
 
+/* Конец текста главы: явная кнопка «Следующая глава» с её названием (и скромная «назад»).
+   Стоит до сносок — читатель дошёл до конца рассуждения и видит, куда дальше.
+   Не .pair: в активную пару, закладки и прогресс не попадает. */
+function chapterEndNav() {
+  const nav = document.createElement('nav');
+  nav.className = 'ch-end';
+  const prev = nextReadable(chapterIndex, -1), next = nextReadable(chapterIndex, 1);
+  if (next >= 0) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'ch-end-next';
+    b.innerHTML = '<span class="ch-end-label">Следующая глава →</span><span class="ch-end-title"></span>';
+    b.querySelector('.ch-end-title').textContent = pickTitle(book.chapters[next].title);
+    b.addEventListener('click', () => loadChapter(next));
+    nav.appendChild(b);
+  } else {
+    const end = document.createElement('div');
+    end.className = 'ch-end-done';
+    end.textContent = 'Конец книги';
+    nav.appendChild(end);
+  }
+  if (prev >= 0) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'ch-end-prev';
+    b.textContent = '← ' + pickTitle(book.chapters[prev].title);
+    b.addEventListener('click', () => loadChapter(prev));
+    nav.appendChild(b);
+  }
+  return nav;
+}
+
 /* порядок языков в паре: канонический [orig, trans] или перевёрнутый (настройка) */
 function displayLangs() {
   return settings.swap ? book.languages.slice().reverse() : book.languages;
@@ -330,10 +363,12 @@ function renderChapter() {
   detachMtCard();          // иначе innerHTML = '' уничтожит карточку вместе с обработчиками
   stream.innerHTML = '';
   activeEl = null;
+  applyHlMode();
   fnJump = null;
   let fnDividerDone = false;
   for (const pair of pairs) {
     if (pair.type === 'footnote' && !fnDividerDone) {
+      stream.appendChild(chapterEndNav());
       const h = document.createElement('h2');
       h.className = 'fn-divider';
       h.textContent = 'Сноски';
@@ -377,6 +412,7 @@ function renderChapter() {
     }
     stream.appendChild(el);
   }
+  if (pairs.length && !fnDividerDone) stream.appendChild(chapterEndNav());
   if (!pairs.length) {
     const note = document.createElement('div');
     note.className = 'load-error';
@@ -437,6 +473,16 @@ function cycleVisibility() {
   clearPeeks(); // сменили язык — прежние подсмотры показывали бы теперь-скрытый
   applyVisibility();
   updateActive();
+}
+
+/* Видимая подсветка активной пары. В книге с переводом она держит глаз на паре
+   «оригинал — перевод» (SPEC 5.3); в одноязычной только отвлекает — автор спросил,
+   задумана ли рамка (18.10.2026). Активная пара при этом считается всегда: по ней
+   ставится закладка и запоминается место — гасим лишь вид. */
+function applyHlMode() {
+  const m = settings.hlActive || 'auto';
+  const off = m === 'never' || (m === 'auto' && !!book && book.languages.length < 2);
+  document.body.classList.toggle('hl-off', off);
 }
 
 /* ===== активная пара (ближайшая к центру вьюпорта) ===== */
@@ -532,6 +578,7 @@ function slidesSync(box) {
   const tr = box.querySelector('.sl-track'), sl = tr.children[i], img = sl && sl.querySelector('img');
   // кадр ещё грузится — не мерить пустую картинку (лента схлопнулась бы до подписи)
   const готов = img && img.complete && img.naturalWidth > 0;
+  if (готов) img.dataset.ok = '1';   // снять заглушку размера (картинка могла прийти из кеша раньше слушателя)
   tr.style.height = готов && sl.offsetHeight ? sl.offsetHeight + 'px' : '';
   if (готов) box.style.setProperty('--sl-mid', (img.offsetHeight / 2) + 'px');
   const cnt = box.querySelector('.sl-count');
@@ -563,7 +610,7 @@ document.addEventListener('scroll', e => {
 // картинки грузятся лениво: высоту листалки уточняем, когда кадр пришёл (load не всплывает)
 document.addEventListener('load', e => {
   const img = e.target;
-  if (img && img.tagName === 'IMG' && img.closest('.sl-slide')) slidesSync(img.closest('.slides'));
+  if (img && img.tagName === 'IMG' && img.closest('.sl-slide')) { img.dataset.ok = '1'; slidesSync(img.closest('.slides')); }
 }, true);
 window.addEventListener('resize', () => document.querySelectorAll('.slides').forEach(slidesSync));
 // стрелки ←/→ листают кадры, пока листалка в фокусе или раскрыта; Esc — свернуть.
@@ -2871,6 +2918,7 @@ function syncSettingControls() {
   $('#set-theme').value = settings.theme;
   $('#set-layout').value = settings.layout;
   $('#set-fnmode').value = settings.fnMode;
+  $('#set-hl').value = settings.hlActive || 'auto';
   $('#set-order').value = settings.swap ? '1' : '0';
   $('#set-align').value = settings.align;
   $('#set-debug').checked = settings.debug;
@@ -2887,6 +2935,8 @@ function bindSettings() {
   theme.addEventListener('change', () => { settings.theme = theme.value; saveSettings(); applyTheme(); });
   layout.addEventListener('change', () => { settings.layout = layout.value; saveSettings(); applyLayout(); updateActive(); });
   fnmode.addEventListener('change', () => { settings.fnMode = fnmode.value; saveSettings(); });
+  const hl = $('#set-hl');
+  hl.addEventListener('change', () => { settings.hlActive = hl.value; saveSettings(); applyHlMode(); });
   align.addEventListener('change', () => { settings.align = align.value; saveSettings(); applyAlign(); });
   $('#set-reset').addEventListener('click', () => {
     settings.fonts = {};

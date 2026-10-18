@@ -112,15 +112,39 @@ body[data-view="library"] #progress { display: none; }
 #btn-warn { color: var(--error); font-size: 0.85rem; }
 #page-indicator { color: var(--muted); font-size: 0.92rem; }
 #btn-scan { color: var(--accent); font-size: 0.92rem; }
-/* стрелки переходов между разделами — крупнее и чётче */
+/* переходы между главами — заметной кнопкой с подписью, а не одной стрелкой:
+   автор не находил их в углах панели (18.10.2026) */
 #btn-prev, #btn-next {
-  font-size: 1.6rem;
+  font-size: 1rem;
   line-height: 1;
   font-weight: 700;
   color: var(--accent);
-  padding: 0.1rem 0.7rem;
+  background: var(--accent-soft);
+  border: 1.5px solid var(--accent);
+  border-radius: 999px;
+  padding: 0.45rem 0.95rem;
+  white-space: nowrap;
 }
-#btn-prev:active, #btn-next:active { background: var(--accent-soft); }
+#btn-prev:hover, #btn-next:hover { background: var(--accent); color: var(--bg); }
+#btn-prev:active, #btn-next:active { background: var(--accent); color: var(--bg); }
+
+/* конец текста главы: «Следующая глава →» с названием */
+.ch-end {
+  margin: 2.2rem 0 1.6rem; display: flex; flex-direction: column; align-items: stretch; gap: 0.7rem;
+}
+.ch-end-next {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 0.25rem; text-align: start;
+  padding: 1rem 1.2rem; border-radius: 14px; cursor: pointer;
+  background: var(--accent-soft); border: 2px solid var(--accent); color: var(--text, inherit);
+}
+.ch-end-next:hover { background: var(--active-bg); }
+.ch-end-label { font-size: 0.85rem; font-weight: 700; letter-spacing: 0.04em; color: var(--accent); }
+.ch-end-title { font-size: 1.1rem; font-weight: 600; line-height: 1.3; }
+.ch-end-prev {
+  align-self: flex-start; background: none; border: 0; padding: 0.3rem 0.2rem; cursor: pointer;
+  color: var(--muted); font-size: 0.9rem; text-align: start;
+}
+.ch-end-done { text-align: center; color: var(--muted); font-size: 0.95rem; }
 .nav-hidden { visibility: hidden; pointer-events: none; }
 
 /* ===== поток пар ===== */
@@ -143,6 +167,8 @@ body[data-view="library"] #progress { display: none; }
   border-inline-start-color: var(--accent);
   background: var(--active-bg);
 }
+/* подсветка выключена (настройка «Подсветка абзаца», по умолчанию — в одноязычных книгах) */
+body.hl-off .pair.active { border-inline-start-color: transparent; background: transparent; }
 .pair.bookmarked { padding-inline-end: 1.7rem; } /* резерв под метку, чтобы не налезала на текст */
 .pair.bookmarked::after {
   content: "🔖";
@@ -259,11 +285,13 @@ body[data-align="justify"] .member p { text-align: justify; }
 }
 .member .sl-track::-webkit-scrollbar { display: none; }
 .member .sl-slide {
-  flex: 0 0 88%; margin: 0; scroll-snap-align: start; scroll-snap-stop: always;
+  flex: 0 0 auto; max-width: 88%; margin: 0; scroll-snap-align: start; scroll-snap-stop: always;
   text-align: center;
 }
+/* до загрузки картинка без размеров — держим место кадра 4:5, чтобы лента не схлопнулась */
+.member .sl-slide img:not([data-ok]) { width: min(88vw, 300px); aspect-ratio: 4 / 5; }
 .member .sl-slide:last-child { scroll-snap-align: end; }
-.member .sl-one .sl-slide { flex-basis: 100%; }
+.member .sl-one .sl-slide { max-width: 100%; margin: 0 auto; }
 .member .sl-slide img {
   display: block; width: auto; height: auto; max-width: 100%; max-height: min(70vh, 70dvh); margin: 0 auto;
   border-radius: 8px; border: 1px solid var(--border); background: #fff;
@@ -271,6 +299,7 @@ body[data-align="justify"] .member p { text-align: justify; }
 }
 .member .sl-slide figcaption {
   margin-top: 0.4em; font-size: 0.85em; color: var(--muted); line-height: 1.35;
+  width: 0; min-width: 100%;   /* подпись не раздвигает кадр: ширину задаёт картинка */
 }
 .member .sl-nav, .member .sl-full {
   position: absolute; z-index: 2; border: 0; padding: 0; cursor: pointer;
@@ -282,9 +311,9 @@ body[data-align="justify"] .member p { text-align: justify; }
 .member .sl-prev { left: 6px; }
 .member .sl-next { right: 6px; }
 .member .sl-nav:disabled { opacity: 0; pointer-events: none; }
-.member .sl-full { top: 8px; left: 8px; font-size: 17px; width: 32px; height: 32px; }
+.member .sl-full { top: 8px; left: 8px; font-size: 22px; font-weight: 700; width: 34px; height: 34px; }
 .member .sl-count {
-  position: absolute; top: 8px; right: 8px; z-index: 2; pointer-events: none;
+  position: absolute; top: 12px; left: 48px; z-index: 2; pointer-events: none;
   padding: 0.15em 0.6em; border-radius: 999px; background: rgba(0, 0, 0, 0.6);
   color: #fff; font-size: 0.78em; font-variant-numeric: tabular-nums;
 }
@@ -304,7 +333,7 @@ body[data-align="justify"] .member p { text-align: justify; }
   background: #0b0b0b; display: flex; flex-direction: column; justify-content: center;
 }
 .member .sl-full-on .sl-title, .member .sl-full-on .sl-slide figcaption { color: #ddd; }
-.member .sl-full-on .sl-slide { flex-basis: 100%; }
+.member .sl-full-on .sl-slide { flex: 0 0 100%; max-width: 100%; }
 .member .sl-full-on .sl-slide img {
   max-height: calc(100vh - 140px); max-height: calc(100dvh - 140px); border: 0;
   cursor: default;
