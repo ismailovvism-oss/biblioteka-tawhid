@@ -9,7 +9,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { buildChapter, glossTokens, glossHash, parseGlossFile } = require(path.join(__dirname, '..', 'parser.js'));
+const { buildChapter, glossTokens, glossHash, parseGlossFile, sharhKey } = require(path.join(__dirname, '..', 'parser.js'));
 
 const dir = process.argv[2];
 if (!dir) {
@@ -20,7 +20,32 @@ if (!dir) {
 const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'book.json'), 'utf8'));
 console.log(`Книга: ${manifest.bookId} — ${manifest.title[manifest.languages[1]] || manifest.title[manifest.languages[0]] || ''}`);
 
+/* Глоссарий (SPEC 3.4f): термин в тексте без статьи — пустая плашка у читателя.
+   Книга шарха (SPEC 3.4g): значок 💡, чья статья не нашлась, — ссылка в никуда.
+   Обе связи проверяем здесь, до деплоя. */
+let glossaryKeys = null;
+if (manifest.glossary) {
+  try {
+    glossaryKeys = new Set(Object.keys(JSON.parse(fs.readFileSync(path.join(dir, manifest.glossary), 'utf8')).entries || {}));
+  } catch (e) { console.log(`    ⚠ глоссарий ${manifest.glossary} не читается: ${e.message}`); }
+}
+let sharhTitles = null, sharhProblem = null;
+if (manifest.sharh) {
+  // книга шарха лежит рядом, в той же папке книг (books/ или books-private/)
+  const sp = path.join(path.dirname(path.resolve(dir)), manifest.sharh, 'book.json');
+  try {
+    const sm = JSON.parse(fs.readFileSync(sp, 'utf8'));
+    sharhTitles = new Set();
+    for (const ch of sm.chapters) {
+      if (!ch.file) continue;
+      for (const t of Object.values(ch.title || {})) sharhTitles.add(sharhKey(t));
+      if (ch.key) sharhTitles.add(sharhKey(ch.key));
+    }
+  } catch (e) { sharhProblem = `книга шарха «${manifest.sharh}» не найдена (${sp})`; }
+}
+
 let total = 0;
+if (sharhProblem) { console.log('    ⚠ ' + sharhProblem); total++; }
 const glossDone = [];      // что реально подписано
 const glossPending = [];   // объявлен слой подстрочника, а файла главы ещё нет
 for (const ch of manifest.chapters) {
@@ -51,6 +76,20 @@ for (const ch of manifest.chapters) {
   for (const src of imgs) {
     if (!fs.existsSync(path.join(dir, src))) {
       warnings.push(`картинка не найдена: ${src} (ищем в ${path.join(dir, src)})`);
+    }
+  }
+  if (glossaryKeys) {
+    const missingTerms = new Set();
+    for (const p of pairs) for (const l of manifest.languages) {
+      for (const m of String(p[l] || '').matchAll(/class="gterm" data-g="([^"]*)"/g)) {
+        if (!glossaryKeys.has(m[1])) missingTerms.add(m[1]);
+      }
+    }
+    for (const t of missingTerms) warnings.push(`термин «${t}»: статьи нет в глоссарии ${manifest.glossary}`);
+  }
+  if (sharhTitles) {
+    for (const p of pairs) for (const t of (p.sharh || [])) {
+      if (!sharhTitles.has(sharhKey(t))) warnings.push(`${p.id}: статья шарха «${t}» не найдена в книге ${manifest.sharh}`);
     }
   }
   /* Подстрочник (SPEC 3.4c): номер в gloss-файле — порядковый номер слова в секторе.

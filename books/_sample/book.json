@@ -1,12 +1,34 @@
 {
   "bookId": "_sample",
-  "title": { "ar": "كتاب تجريبي", "ru": "Тестовая мини-книга" },
-  "languages": ["ar", "ru"],
-  "rtl": ["ar"],
+  "title": {
+    "ar": "كتاب تجريبي",
+    "ru": "Тестовая мини-книга"
+  },
+  "languages": [
+    "ar",
+    "ru"
+  ],
+  "rtl": [
+    "ar"
+  ],
   "chapters": [
-    { "file": "01.md", "title": { "ar": "المقدمة", "ru": "Вступление" } },
-    { "file": "02.md", "title": { "ar": "في فضل العلم", "ru": "О достоинстве знания" } }
+    {
+      "file": "01.md",
+      "title": {
+        "ar": "المقدمة",
+        "ru": "Вступление"
+      }
+    },
+    {
+      "file": "02.md",
+      "title": {
+        "ar": "في فضل العلم",
+        "ru": "О достоинстве знания"
+      }
+    }
   ],
   "hasImages": false,
-  "imagePattern": "img/p{page}.jpg"
+  "imagePattern": "img/p{page}.jpg",
+  "glossary": "glossary.json",
+  "sharh": "_sample-sharh"
 }

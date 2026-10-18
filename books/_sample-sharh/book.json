@@ -1,0 +1,22 @@
+{
+  "bookId": "_sample-sharh",
+  "title": {
+    "ru": "Шарх к тестовой мини-книге"
+  },
+  "languages": [
+    "ru"
+  ],
+  "rtl": [],
+  "type": "sharh",
+  "sharhOf": "_sample",
+  "glossary": "../_sample/glossary.json",
+  "chapters": [
+    {
+      "file": "01.md",
+      "title": {
+        "ru": "Знание прежде слова и дела"
+      },
+      "key": "1-Знание прежде слова и дела"
+    }
+  ]
+}

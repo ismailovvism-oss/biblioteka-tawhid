@@ -58,6 +58,31 @@
   </div>
 </div>
 
+<!-- статья глоссария по нажатию на термин (SPEC 3.4f) -->
+<div id="term-pop" hidden>
+  <div class="term-pop-head">
+    <button type="button" id="term-pop-back" title="К прежней статье" hidden>←</button>
+    <b id="term-pop-title"></b>
+  </div>
+  <div id="term-pop-body"></div>
+  <div class="gl-pop-actions">
+    <button type="button" id="term-pop-close">Закрыть</button>
+  </div>
+</div>
+
+<!-- статья шарха к абзацу (SPEC 3.4g): сбоку на широком экране, снизу на телефоне -->
+<div id="sharh-panel" class="overlay" hidden>
+  <div class="sheet">
+    <div class="sharh-head">
+      <h2 id="sharh-title"></h2>
+      <button type="button" id="sharh-close" title="Закрыть" aria-label="Закрыть">✕</button>
+    </div>
+    <div id="sharh-tabs" hidden></div>
+    <div id="sharh-body"></div>
+    <button type="button" id="sharh-open" hidden>Открыть в книге шарха →</button>
+  </div>
+</div>
+
 <footer id="bottombar">
   <button id="btn-prev" type="button" title="Предыдущая глава" aria-label="Предыдущая глава">‹<span class="nav-lbl"> Назад</span></button>
   <button id="page-indicator" type="button" title="Перейти к странице">стр. —</button>

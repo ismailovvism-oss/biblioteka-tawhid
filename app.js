@@ -397,6 +397,18 @@ function renderChapter() {
       el.appendChild(label);
     }
     buildMembers(pair, el);
+    // к абзацу есть статья шарха (заметка «Шарх: …» в мастере) и у книги объявлена
+    // книга шарха — значок на полях; без book.sharh открыть было бы нечего
+    if (pair.type === 'text' && book.sharh && pair.sharh && pair.sharh.length) {
+      const mark = document.createElement('button');
+      mark.type = 'button';
+      mark.className = 'sharh-mark';
+      mark.textContent = '💡';
+      mark.title = 'Шарх: ' + pair.sharh.join('; ');
+      mark.setAttribute('aria-label', mark.title);
+      el.classList.add('has-sharh');
+      el.appendChild(mark);
+    }
     // односторонние текст-сектора — во всю ширину: основной текст книги (есть
     // только перевод) ИЛИ оригинал, перевод которого ещё не готов («awaiting»).
     // Помечаем структурно (по наличию контента), чтобы пережить смену видимости;
@@ -853,6 +865,11 @@ function findPairElBack(el) {
 
 stream.addEventListener('click', e => {
   if (slidesClick(e)) return;
+  // термин глоссария и значок шарха — до сносок и «тапа по паре» (тот бы раскрыл перевод)
+  const term = e.target.closest('button.gterm');
+  if (term && termDict) { openTermPop(term.dataset.g, term); return; }
+  const sharhBtn = e.target.closest('.sharh-mark');
+  if (sharhBtn) { openSharhFor(sharhBtn); return; }
   // подписанное слово: показать, что за лемма, и дать убрать её из роя.
   // Проверяем первым — обёртка слова лежит глубже подкраски пометки
   const gw = e.target.closest('span.gl');
@@ -2264,6 +2281,194 @@ document.addEventListener('click', e => {
   if (glPop && !e.target.closest('#gl-pop') && !e.target.closest('span.gl')) closeGlossPop();
 });
 
+/* ===== ГЛОССАРИЙ (SPEC 3.4f) ==============================================
+ * Ссылка мастера [`термин`](glossary.md#якорь) рисуется парсером кнопкой .gterm.
+ * Словарь — glossary.json книги (поле book.glossary): { entries: { якорь: { term, md } } }.
+ * Нет словаря — кнопка остаётся обычным словом (CSS по body.has-glossary).
+ * В статье бывают ссылки на другие термины: переход внутри плашки, «← назад» по цепочке.
+ */
+let termDict = null;
+let termTrail = [];
+async function loadGlossary() {
+  termDict = null;
+  document.body.classList.remove('has-glossary');
+  if (!book || !book.glossary) return;
+  const forBook = bookId;
+  try {
+    const j = JSON.parse(await fetchBookText(base + book.glossary));
+    if (bookId !== forBook) return;   // пока грузили, открыли другую книгу
+    termDict = j.entries || {};
+    document.body.classList.add('has-glossary');
+  } catch (err) {
+    console.warn(`Глоссарий книги «${forBook}» не загрузился: ${err.message}`);
+  }
+}
+function termHtml(md) {
+  // статья — абзацы через пустую строку, внутри — тот же markdown, что в секторе
+  return String(md || '').split(/\n\s*\n/).map(p => p.trim()).filter(Boolean)
+    .map(p => renderBlocks(p.split('\n'), base).join('')).join('');
+}
+function showTerm(anchor) {
+  const e = termDict && termDict[anchor];
+  $('#term-pop-title').textContent = e ? e.term : anchor;
+  $('#term-pop-body').innerHTML = e ? termHtml(e.md) : '<p class="term-missing">Статьи нет в глоссарии книги.</p>';
+  $('#term-pop-back').hidden = termTrail.length < 2;
+}
+function openTermPop(anchor, btn) {
+  const pop = $('#term-pop');
+  if (btn) termTrail = [];
+  termTrail.push(anchor);
+  showTerm(anchor);
+  pop.hidden = false;
+  if (!btn) return;   // переход внутри плашки — место прежнее
+  placeTermPop(pop, btn.getBoundingClientRect());
+}
+/* Плашка привязана к экрану (position: fixed): статья бывает длинной, и если её
+   ставить в координатах страницы, она уезжает за верхнюю панель. Под словом, если
+   влезает, иначе над ним; не влезает нигде — высота урезается до большего из мест. */
+function placeTermPop(pop, r) {
+  const top0 = ($('#topbar') ? $('#topbar').getBoundingClientRect().bottom : 0) + 8;
+  const bb = $('#bottombar');
+  const bottom0 = window.innerHeight - (bb && !bb.hidden ? bb.getBoundingClientRect().height : 0) - 8;
+  const below = bottom0 - (r.bottom + 8), above = (r.top - 8) - top0;
+  pop.style.maxHeight = Math.max(160, below, above) + 'px';
+  const w = pop.offsetWidth, h = pop.offsetHeight;
+  const top = h <= below ? r.bottom + 8 : h <= above ? r.top - 8 - h : (below >= above ? r.bottom + 8 : top0);
+  pop.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2)) + 'px';
+  pop.style.top = Math.max(top0, top) + 'px';
+}
+function closeTermPop() {
+  $('#term-pop').hidden = true;
+  termTrail = [];
+}
+$('#term-pop').addEventListener('click', e => {
+  const t = e.target.closest('button.gterm');
+  if (t) { e.stopPropagation(); openTermPop(t.dataset.g, null); }
+});
+bindClick('#term-pop-close', closeTermPop);
+bindClick('#term-pop-back', () => { termTrail.pop(); showTerm(termTrail[termTrail.length - 1]); });
+document.addEventListener('click', e => {
+  if (!$('#term-pop').hidden && !e.target.closest('#term-pop') && !e.target.closest('button.gterm')) closeTermPop();
+});
+
+/* ===== ШАРХ У АБЗАЦА (SPEC 3.4g) ==========================================
+ * book.sharh — id одноязычной книги шарха. Значок 💡 у абзаца открывает её главу
+ * в боковой панели: место в тексте остаётся, «Открыть в книге шарха» ведёт к ней целиком.
+ * Глава ищется по названию (подпись ссылки в мастере ↔ title или key главы, sharhKey).
+ */
+const sharhBooks = new Map();   // id → { entry, base, manifest }
+const sharhChapters = new Map(); // id/file → pairs
+async function sharhBook(id) {
+  if (sharhBooks.has(id)) return sharhBooks.get(id);
+  // книга шарха может не стоять на полке — тогда ищем её по обычному пути books/<id>/
+  const entry = library.find(b => b.id === id) || { id, base: 'books/' + id + '/' };
+  const b = entry.base.endsWith('/') ? entry.base : entry.base + '/';
+  const manifest = JSON.parse(await fetchBookText(b + 'book.json', entry.private === true));
+  const v = { entry, base: b, manifest };
+  sharhBooks.set(id, v);
+  return v;
+}
+function sharhChapterOf(manifest, title) {
+  const k = sharhKey(title);
+  return manifest.chapters.findIndex(ch => ch.file &&
+    (sharhKey(pickTitle(ch.title)) === k || (ch.key && sharhKey(ch.key) === k)));
+}
+async function sharhPairs(sb, ci) {
+  const ch = sb.manifest.chapters[ci];
+  const key = sb.entry.id + '/' + ch.file;
+  if (!sharhChapters.has(key)) {
+    const texts = {};
+    await Promise.all(sb.manifest.languages.map(async lang => {
+      try { texts[lang] = await fetchBookText(`${sb.base}${lang}/${ch.file}`, sb.entry.private === true); }
+      catch { texts[lang] = ''; }
+    }));
+    sharhChapters.set(key, buildChapter(texts, sb.manifest.languages, { base: sb.base }).pairs);
+  }
+  return sharhChapters.get(key);
+}
+let sharhOrigin = null;   // абзац, от которого открыт шарх: туда вернёт «назад» из книги шарха
+function openSharhFor(btn) {
+  const pairEl = btn.closest('.pair');
+  const pair = pairEl && pairs.find(p => p.type === 'text' && p.id === pairEl.dataset.id);
+  if (!pair || !pair.sharh || !pair.sharh.length) return;
+  sharhOrigin = { book: bookId, chapter: chapterOf(pairEl), sector: pair.id };
+  const tabs = $('#sharh-tabs');
+  tabs.innerHTML = '';
+  tabs.hidden = pair.sharh.length < 2;
+  pair.sharh.forEach((t, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = t;
+    b.addEventListener('click', () => showSharh(t, b));
+    tabs.appendChild(b);
+    if (i === 0) setTimeout(() => showSharh(t, b));
+  });
+  openOverlay($('#sharh-panel'));
+}
+async function showSharh(title, tab) {
+  document.querySelectorAll('#sharh-tabs button').forEach(b => b.classList.toggle('on', b === tab));
+  const body = $('#sharh-body');
+  const open = $('#sharh-open');
+  $('#sharh-title').textContent = title;
+  body.innerHTML = '<p class="sharh-wait">Загрузка…</p>';
+  open.hidden = true;
+  const forBook = book && book.sharh;
+  try {
+    const sb = await sharhBook(forBook);
+    const ci = sharhChapterOf(sb.manifest, title);
+    if (ci < 0) { body.innerHTML = '<p class="sharh-wait">Статья «' + escapeHtml(title) + '» в книге шарха не найдена.</p>'; return; }
+    $('#sharh-title').textContent = pickTitle(sb.manifest.chapters[ci].title) || title;
+    const ps = await sharhPairs(sb, ci);
+    const lang = sb.manifest.languages[0];
+    let html = '', fnDone = false;
+    for (const p of ps) {
+      if (p.type === 'footnote' && !fnDone) { html += '<h3 class="fn-divider">Сноски</h3>'; fnDone = true; }
+      if (p[lang] == null) continue;
+      html += p.type === 'footnote'
+        ? '<div class="sharh-fn" data-fn="' + p.id.slice(2) + '"><b>[' + p.id.slice(2) + ']</b> ' + p[lang] + '</div>'
+        : '<div class="sharh-par">' + p[lang] + '</div>';
+    }
+    body.innerHTML = html;
+    // статья шарха — русская, но с арабскими цитатами: такой абзац читается справа налево
+    body.querySelectorAll('p, blockquote').forEach(el => {
+      const letters = [...el.textContent].filter(ch => /\p{L}/u.test(ch));
+      if (letters.length && letters.filter(ch => /[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/.test(ch)).length / letters.length > 0.7) el.dir = 'rtl';
+    });
+    body.scrollTop = 0;
+    $('#sharh-panel .sheet').scrollTop = 0;
+    open.hidden = false;
+    open.onclick = () => {
+      $('#sharh-panel').hidden = true;
+      // маркер панели в истории заменяем адресом книги шарха: «назад» из неё вернёт к
+      // тексту. Через consumeOverlayMark нельзя — его отложенный history.back() съел бы
+      // только что положенный адрес шарха
+      const url = '?book=' + encodeURIComponent(sb.entry.id);
+      // место в тексте — ровно абзац со значком (позиция по прокрутке могла не успеть записаться)
+      if (sharhOrigin && sharhOrigin.book === bookId) {
+        setLast(bookId, { chapter: sharhOrigin.chapter, sector: sharhOrigin.sector, ts: Date.now() });
+        saveSettings();
+      }
+      if (overlayMark && !anyPopupOpen()) { overlayMark = false; history.replaceState({}, '', url); }
+      else history.pushState({}, '', url);
+      openBook(sb.entry, { chapter: ci });
+    };
+  } catch (err) {
+    body.innerHTML = '<p class="sharh-wait">Книга шарха не открылась: ' + escapeHtml(err.message) + '</p>';
+  }
+}
+// внутри панели: сноска — прыжок к её тексту внизу статьи, термин — плашка глоссария
+$('#sharh-body').addEventListener('click', e => {
+  const ref = e.target.closest('.fnref');
+  if (ref) {
+    const fn = $('#sharh-body').querySelector('.sharh-fn[data-fn="' + ref.dataset.fn + '"]');
+    if (fn) { fn.scrollIntoView({ behavior: 'smooth', block: 'center' }); flash(fn); }
+    return;
+  }
+  const term = e.target.closest('button.gterm');
+  if (term && termDict) openTermPop(term.dataset.g, term);
+});
+bindClick('#sharh-close', () => { $('#sharh-panel').hidden = true; consumeOverlayMark(); });
+
 /* ── настройки подстрочника ──────────────────────────────────────────────── */
 
 function setupGlossSettings() {
@@ -3310,10 +3515,11 @@ $('#page-form').addEventListener('submit', e => {
 
 /* ===== клавиатура: стрелки — главы, Esc — закрыть ===== */
 function anyPopupOpen() {
-  return [...document.querySelectorAll('.overlay')].some(o => !o.hidden) || !$('#comic').hidden ||
+  return [...document.querySelectorAll('.overlay')].some(o => !o.hidden) || !$('#comic').hidden || !$('#term-pop').hidden ||
     !$('#img-overlay').hidden || !$('#page-popover').hidden;
 }
 function closeTopPopup() {
+  if (!$('#term-pop').hidden) { closeTermPop(); return true; }
   if (!$('#comic').hidden) { closeComic(false); return true; }
   if (!$('#img-overlay').hidden) { $('#img-overlay').hidden = true; return true; }
   if (!$('#page-popover').hidden) { $('#page-popover').hidden = true; return true; }
@@ -4574,6 +4780,7 @@ async function openBook(entry, opts = {}) {
   applyFonts();
   setupFontSettings();
   glForget();          // подстрочник прошлой книги к этой отношения не имеет
+  loadGlossary();      // не ждём: кнопки терминов рисуются и без него, словарь догоняет
   document.title = pickTitle(book.title);
   buildToc();
   buildMarkPanel();
@@ -4584,6 +4791,10 @@ async function openBook(entry, opts = {}) {
     const ci = await chapterOfSector(opts.sector);
     if (ci >= 0) { await loadChapter(ci, opts.sector); return; }
     toast(`Сектор ${opts.sector} не найден`);
+  }
+  // переход в главу по номеру (из панели шарха, из пометки без сектора)
+  if (Number.isInteger(opts.chapter) && opts.chapter >= 0 && opts.chapter < book.chapters.length) {
+    await loadChapter(opts.chapter); return;
   }
   if (opts.fromStart) { await loadChapter(0); if (book.view === 'comic') openComic(chapterIndex, 0); return; }
   const last = getLast(bookId);

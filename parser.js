@@ -19,8 +19,27 @@ function escapeHtml(s) {
 /* Inline-markdown внутри сектора: код, подчёркивание, жирный, курсив, маркеры сносок [^N].
    Код в обратных кавычках вынимается ПЕРВЫМ и подменяется плейсхолдером: внутри `a*b*c`
    звёздочки — часть термина (транслитерация вроде `qiyas istithna'i`), а не курсив. */
+/*
+ * Ссылка на глоссарий книги (SPEC 3.4f): разметка мастера Obsidian как есть —
+ * [`термин`](glossary.md#якорь) или [слово](glossary.md#якорь), путь к файлу любой
+ * (`glossary.md`, `../glossary.md`, `1/glossary.md`). Читалка показывает слово, а по
+ * нажатию — статью из glossary.json книги. Якорь бывает процент-закодирован (Obsidian
+ * так пишет кириллицу) — раскодируем. Другие ссылки Контракт по-прежнему не понимает.
+ */
+const GLOSSARY_LINK_RE = /\[([^\]\n]+)\]\((?:[^)\s]*\/)?glossary\.md#([^)\s]+)\)/g;
+function glossaryAnchor(raw) {
+  let a = raw;
+  try { a = decodeURIComponent(raw); } catch { /* битый %-код — оставляем как есть */ }
+  // якорь заголовка в Obsidian: регистр не важен, пробел = дефис
+  return a.trim().toLowerCase().replace(/\s+/g, '-');
+}
+
 function inlineMd(text) {
   let h = escapeHtml(text);
+  // ссылки глоссария — до кода: подпись часто в обратных кавычках ([`иман`](…))
+  const terms = [];
+  h = h.replace(GLOSSARY_LINK_RE, (_, label, anchor) =>
+    '\u0001' + (terms.push({ label: label.replace(/`/g, ''), anchor: glossaryAnchor(anchor) }) - 1) + '\u0001');
   const codes = [];
   h = h.replace(/`([^`]+)`/g, (_, c) => '\u0000' + (codes.push(c) - 1) + '\u0000');
   h = h.replace(/&lt;u&gt;([\s\S]*?)&lt;\/u&gt;/g, '<u>$1</u>'); // подчёркивание <u>…</u>
@@ -29,8 +48,33 @@ function inlineMd(text) {
   h = h.replace(/\[\^(\d+)\]/g, '<button class="fnref" data-fn="$1" type="button">$1</button>');
   h = h.replace(/\n/g, '<br>');
   h = h.replace(/\u0000(\d+)\u0000/g, (_, n) => '<code>' + codes[Number(n)] + '</code>');
+  h = h.replace(/\u0001(\d+)\u0001/g, (_, n) => {
+    const t = terms[Number(n)];
+    return '<button class="gterm" data-g="' + t.anchor.replace(/"/g, '&quot;') + '" type="button">' + t.label + '</button>';
+  });
   return h;
 }
+
+/*
+ * Шарх у абзаца (SPEC 3.4g). В мастере ссылка на статью шарха — callout в скрытой
+ * заметке сразу ПОСЛЕ абзаца, к которому она относится:
+ *   <!-- note -->
+ *   > [!caution] Шарх: [[392-Амм по лицам…|‘Амм по лицам…]]
+ *   <!-- /note -->
+ * Заметка при чтении скрыта, а сама ссылка становится значком 💡 у этого абзаца.
+ * При публикации вики-ссылка превращается в подпись — по ней и ищем главу книги шарха.
+ */
+const SHARH_LINE_RE = /^>\s*\[![\w-]+\][+-]?\s*Шарх\s*:\s*(.+)$/i;
+function sharhTitle(raw) {
+  return raw.replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, '$2').replace(/\[\[([^\]]+)\]\]/g, '$1').trim();
+}
+/* Ключ сравнения названий: без номера страницы в начале, регистра, знаков и «‘’ʿ». */
+function sharhKey(s) {
+  return String(s || '').replace(/^\s*\d+(?:-\d+)?\s*[-–—.]\s*/, '').toLowerCase()
+    .replace(/ё/g, 'е').replace(/[^\p{L}\p{N}]+/gu, '');
+}
+/* Открытые метки Вычитки: ==?…== (развилка), ==pro?…== (запрос), ==pro✓…== (ответ). */
+const OPEN_MARK_RE = /==(?:\?|pro\?|pro✓)/;
 
 /*
  * Иллюстрация в тексте: строка целиком из ![подпись](media/схема.png) — блок-картинка
@@ -271,7 +315,20 @@ function parseFile(md) {
     // личные заметки автора (вычитка) при чтении прячем целиком
     if (/^<!--\s*note\s*-->$/i.test(line)) { flush(); inNote = true; continue; }
     if (/^<!--\s*\/\s*note\s*-->$/i.test(line)) { inNote = false; continue; }
-    if (inNote) continue;
+    if (inNote) {
+      const sm = line.match(SHARH_LINE_RE);
+      if (sm) {
+        // заметка стоит после своего абзаца; пустые секторы (якоря, которые конвертер
+        // ставит внутри заметки) пропускаем — ссылка принадлежит последнему с текстом
+        for (let k = items.length - 1; k >= 0; k--) {
+          if (items[k].type === 'text' && items[k].paras.length) {
+            (items[k].sharh || (items[k].sharh = [])).push(sharhTitle(sm[1]));
+            break;
+          }
+        }
+      }
+      continue;
+    }
     if ((m = line.match(/^<!--\s*p(\d+)\s*-->$/))) {
       flush();
       page = parseInt(m[1], 10);
@@ -340,12 +397,17 @@ function buildChapter(texts, langs, opts) {
       seenIds.add(it.id);
       let g = map.get(it.baseId);
       if (!g) {
-        g = { baseId: it.baseId, type: it.type, page: it.page, parts: [], refs: [], images: [] };
+        g = { baseId: it.baseId, type: it.type, page: it.page, parts: [], refs: [], images: [], sharh: [] };
         map.set(it.baseId, g);
       }
       g.parts.push(it);
+      if (it.sharh) g.sharh.push(...it.sharh);
       if (g.page == null && it.page != null) g.page = it.page;
       for (const para of it.paras) {
+        // метка вычитки — признак неготового текста: в опубликованное попасть не должна
+        if (OPEN_MARK_RE.test(para)) {
+          warnings.push(`[${lang}] открытая метка вычитки «==?…==» в ${it.id} — блок ещё не готов к публикации`);
+        }
         const re = /\[\^(\d+)\]/g;
         let m;
         while ((m = re.exec(para))) g.refs.push(m[1]);
@@ -402,9 +464,14 @@ function buildChapter(texts, langs, opts) {
       refs: [...new Set([...(o ? o.refs : []), ...(t ? t.refs : [])])],
       // картинки обоих языков: у каждого своя разметка, но проверять валидатору — все
       images: [...new Set([...(o ? o.images : []), ...(t ? t.images : [])])],
+      // статьи шарха к этому абзацу (подписи из заметок) — у перевода и у оригинала
+      sharh: [...new Set([...(o ? o.sharh : []), ...(t ? t.sharh : [])])],
     };
     pair[orig] = o ? renderGroup(o, base) : null;
     if (trans) pair[trans] = t ? renderGroup(t, base) : null;
+    // пустой сектор (якорь без текста — так конвертер метит блоки внутри заметок)
+    // читателю не нужен: пустая плашка во всю ширину выглядела бы опечаткой
+    if (!pair[orig] && !(trans && pair[trans]) && !pair.sharh.length) continue;
     pairs.push(pair);
     // непарные секторы — НЕ ошибка: гибридная модель намеренно их допускает
     // (ru-only = проза во всю ширину, ar-only = оригинал с меткой «идёт перевод»);
@@ -760,7 +827,7 @@ function glossPrompt(html, lang) {
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
-    parseFile, buildChapter, renderGroup, inlineMd, escapeHtml,
+    parseFile, buildChapter, renderGroup, inlineMd, escapeHtml, sharhKey, glossaryAnchor,
     GLOSS_SKIP_TAGS, GLOSS_CLASSES, glossPlainText, glossWords, glossTokens,
     glossHash, glossNormalizeBase, parseGlossFile,
     glossPromptHead, glossSectorBlock, glossPrompt,
