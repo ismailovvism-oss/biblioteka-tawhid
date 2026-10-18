@@ -12,6 +12,7 @@ const DEFAULTS = {
   visibility: 'both',  // both | <lang> | quiz:<lang> (самопроверка: виден <lang>, второй язык по тапу)
   layout: 'auto',      // auto | v | h
   fnMode: 'inline',    // inline | jump
+  rotateHints: 0,      // сколько раз показали «поверните телефон» в комиксе (после 3 — молчим)
   hlActive: 'auto',    // подсветка абзаца у центра экрана: auto (только в книгах с переводом) | always | never
   align: 'start',      // start | justify — выравнивание текста
   debug: false,        // панель валидатора
@@ -712,6 +713,7 @@ function comicRender() {
   if (f.t === 'img') {
     const img = document.createElement('img');
     img.src = f.src; img.alt = f.alt; img.draggable = false;
+    img.addEventListener('load', () => comicRotateHint(img));
     st.appendChild(img); cap = f.cap;
   } else if (f.t === 'title') {
     const d = document.createElement('div'); d.className = 'cm-title';
@@ -768,6 +770,7 @@ async function openComic(ci, at) {
   });
   openOverlay($('#comic'));
   document.body.classList.add('comic-open');
+  comic.hinted = false;
   await comicIndex();
   if (typeof at === 'string' && at !== 'last') {
     const fr = await comicFrames(ci);
@@ -775,6 +778,23 @@ async function openComic(ci, at) {
   }
   await comicGoto(ci, at);
 }
+/* «Поверните телефон»: широкий кадр на вертикальном экране мелок. Раз за открытие
+   комикса, первые три открытия; гаснет через 3 с или сразу после поворота. */
+let rotateHintTimer = null;
+function comicRotateHint(img) {
+  if (comic.hinted || (settings.rotateHints || 0) >= 3) return;
+  if (!(img.naturalWidth > img.naturalHeight * 1.2 && innerHeight > innerWidth)) return;
+  comic.hinted = true;
+  settings.rotateHints = (settings.rotateHints || 0) + 1; saveSettings();
+  const h = $('#cm-hint'); h.classList.remove('fade'); h.hidden = false;
+  clearTimeout(rotateHintTimer);
+  rotateHintTimer = setTimeout(hideRotateHint, 3000);
+}
+function hideRotateHint() {
+  const h = $('#cm-hint'); if (h.hidden) return;
+  h.classList.add('fade'); setTimeout(() => { h.hidden = true; }, 400);
+}
+window.addEventListener('resize', () => { if (innerWidth > innerHeight) hideRotateHint(); });
 function comicGlobal(g) {        // сквозной номер → [глава, кадр]
   for (const [k, s, len] of comic.order) if (g < s + len) return [k, g - s];
   const last = comic.order[comic.order.length - 1]; return [last[0], last[2] - 1];
