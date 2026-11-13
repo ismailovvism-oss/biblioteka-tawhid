@@ -81,6 +81,34 @@
       "era": "Современность"
     },
     {
+      "id": "posuda",
+      "base": "books/posuda/",
+      "title": {
+        "ru": "Накрывайте посуду"
+      },
+      "category": "fiqh-adab",
+      "review": "approved",
+      "progress": "ready",
+      "genre": [
+        "Исследование"
+      ],
+      "authors": [
+        "Исмаил Абу Хаммад"
+      ],
+      "langs": [
+        "ru"
+      ],
+      "tags": [
+        "фикх/адаб/еда",
+        "фикх/адаб/сон",
+        "усуль/хукм/иршад",
+        "усуль/хукм/сунна",
+        "усуль/иллят"
+      ],
+      "era": "Современность",
+      "cover": "books/posuda/cover.jpg"
+    },
+    {
       "id": "fatiha",
       "base": "books/fatiha/",
       "title": {
