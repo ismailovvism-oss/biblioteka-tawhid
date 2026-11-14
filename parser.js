@@ -34,6 +34,19 @@ function glossaryAnchor(raw) {
   return a.trim().toLowerCase().replace(/\s+/g, '-');
 }
 
+/*
+ * Саляват ﷺ (U+FDFA) в русском и английском тексте. У основного шрифта (Georgia, PT Serif…)
+ * этого знака нет, и браузер берёт первый попавшийся системный арабский шрифт; часто там
+ * высокая каллиграфическая вязь, которая налезает на соседние строки (автор, 14.11.2026).
+ * Поэтому знак оборачиваем в span.slw, а стиль задаёт ему арабский веб-шрифт (style.css).
+ * В арабском абзаце знак оставляем как есть: там он набран шрифтом самого текста.
+ */
+const ARABIC_CH_RE = /[؀-ۿݐ-ݿﭐ-﷿ﹰ-﻿]/;
+function mostlyArabic(text) {
+  const letters = String(text).match(/\p{L}/gu) || [];
+  return letters.length > 0 && letters.filter(ch => ARABIC_CH_RE.test(ch)).length / letters.length > 0.5;
+}
+
 function inlineMd(text) {
   let h = escapeHtml(text);
   // ссылки глоссария — до кода: подпись часто в обратных кавычках ([`иман`](…))
@@ -46,6 +59,7 @@ function inlineMd(text) {
   h = h.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   h = h.replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>');
   h = h.replace(/\[\^(\d+)\]/g, '<button class="fnref" data-fn="$1" type="button">$1</button>');
+  if (h.includes('ﷺ') && !mostlyArabic(text)) h = h.replace(/ﷺ/g, '<span class="slw">ﷺ</span>');
   h = h.replace(/\n/g, '<br>');
   h = h.replace(/\u0000(\d+)\u0000/g, (_, n) => '<code>' + codes[Number(n)] + '</code>');
   h = h.replace(/\u0001(\d+)\u0001/g, (_, n) => {

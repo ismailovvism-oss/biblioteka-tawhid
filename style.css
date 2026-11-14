@@ -368,6 +368,18 @@ body.sl-full-open { overflow: hidden; }
 }
 .member.lang-hidden { display: none; }
 
+/* Саляват ﷺ в русском и английском тексте (parser.js, mostlyArabic). Свой арабский
+   веб-шрифт вместо случайного системного: знак выходит компактным, а не высокой вязью
+   через три строки. Чуть крупнее текста, иначе мелко; line-height: 0 — строки не раздвигает.
+   Курсив и жирный вокруг на вязь не переносим: косая или дорисованная вязь читается хуже. */
+.slw {
+  font-family: "Noto Naskh Arabic", "Amiri", "Scheherazade New", serif;
+  font-size: 1.3em;
+  line-height: 0;
+  font-style: normal;
+  font-weight: normal;
+}
+
 /* «подсмотреть» второй язык: тап по паре в одноязычном режиме */
 body[data-peek] .pair { cursor: pointer; }
 .pair.peek .member.lang-hidden { display: block; opacity: 0.72; }
