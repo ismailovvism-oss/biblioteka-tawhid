@@ -24,6 +24,7 @@
   <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
   <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></symbol>
   <symbol id="i-library" viewBox="0 0 24 24"><path d="M4 4v16M8 8v12M12 6v14M16 6l4 14"/></symbol>
+  <symbol id="i-article" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 13h6M9 17h6"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></symbol>
   <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M19 21l-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></symbol>
   <symbol id="i-scissors" viewBox="0 0 24 24"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M8.12 8.12L12 12M20 4L8.12 15.88M14.8 14.8L20 20"/></symbol>
@@ -55,7 +56,7 @@
 
 <header id="topbar">
   <button id="btn-cattree" type="button" title="Разделы"><svg class="ico" aria-hidden="true"><use href="#i-menu"/></svg></button>
-  <button id="btn-home" type="button" title="Все книги"><svg class="ico" aria-hidden="true"><use href="#i-library"/></svg></button>
+  <button id="btn-home" type="button" title="Библиотека: книги и статьи"><svg class="ico" aria-hidden="true"><use href="#i-library"/></svg></button>
   <button id="btn-toc" type="button" title="Оглавление"><svg class="ico" aria-hidden="true"><use href="#i-list"/></svg></button>
   <button id="btn-search" type="button" title="Поиск (по книге или по всей библиотеке)"><svg class="ico" aria-hidden="true"><use href="#i-search"/></svg></button>
   <button id="btn-bookmark" type="button" title="Закладка на текущем месте"><svg class="ico" aria-hidden="true"><use href="#i-bookmark"/></svg></button>
@@ -159,7 +160,7 @@
       <h3 class="sheet-sub">Пометки <span id="bm-count" class="sub-count"></span></h3>
       <ul id="bm-list"></ul>
     </section>
-    <h3 class="sheet-sub">Главы</h3>
+    <h3 class="sheet-sub" id="toc-sub">Главы</h3>
     <input id="toc-filter" type="search" placeholder="Фильтр по названию главы…" autocomplete="off" hidden>
     <ul id="toc-list"></ul>
   </div>
@@ -297,16 +298,23 @@
   <div class="sheet help">
     <h2>Справка</h2>
 
+    <h3 class="sheet-sub">Книги и статьи</h3>
+    <ul>
+      <li><b>Книга</b> стоит обложкой на полке, открывается через карточку и читается по главам.</li>
+      <li><b>Статья</b> отвечает на один вопрос: в ленте видны её заголовок, аннотация и время чтения; открывается сразу в текст и идёт одной страницей — её разделы подряд, сноски в конце.</li>
+      <li>Вкладки <b>«Книги / Статьи»</b> — над полкой. Разделы, фильтры и поиск у них общие.</li>
+    </ul>
+
     <h3 class="sheet-sub">Жесты</h3>
     <ul>
       <li><b>Тап по абзацу</b> — когда показан один язык, временно раскрывает второй (повторный тап прячет).</li>
-      <li><b>Свайп влево/вправо</b> — следующая / предыдущая глава.</li>
+      <li><b>Свайп влево/вправо</b> — следующая / предыдущая глава (в книге; статья — одна страница).</li>
     </ul>
 
     <h3 class="sheet-sub">Кнопки</h3>
     <ul>
-      <li><b><svg class="ico" aria-hidden="true"><use href="#i-library"/></svg></b> — все книги (библиотека).</li>
-      <li><b><svg class="ico" aria-hidden="true"><use href="#i-list"/></svg></b> — оглавление и список закладок.</li>
+      <li><b><svg class="ico" aria-hidden="true"><use href="#i-library"/></svg></b> — библиотека: книги и статьи.</li>
+      <li><b><svg class="ico" aria-hidden="true"><use href="#i-list"/></svg></b> — оглавление (у статьи — её разделы) и список закладок.</li>
       <li><b><svg class="ico" aria-hidden="true"><use href="#i-search"/></svg></b> — поиск по книге (оба языка; арабский — без учёта огласовок).</li>
       <li><b><svg class="ico" aria-hidden="true"><use href="#i-bookmark"/></svg></b> — поставить/снять закладку на текущем месте.</li>
       <li><b><svg class="ico" aria-hidden="true"><use href="#i-scissors"/></svg></b> — вырезки и тематические сборники.</li>

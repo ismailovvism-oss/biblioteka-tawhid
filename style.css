@@ -1881,3 +1881,184 @@ body.comic-open { overflow: hidden; }
 #btn-comic:hover { opacity: 1; border-color: var(--accent); }
 body:not([data-view="reading"]) #btn-comic { display: none; }
 @media (prefers-reduced-motion: reduce) { #cm-stage > * { animation: none; } }
+
+/* ===== книги и статьи (14.11.2026) =====
+   Запись реестра бывает книгой или статьёй ("kind"). Книга стоит обложкой на полке, как
+   раньше. Статья — карточкой в ленте и одной страницей в чтении; всё, что ниже, про неё. */
+
+/* вкладки полки «Книги / Статьи» */
+.kind-tabs {
+  display: flex;
+  gap: 0.2rem;
+  max-width: 46rem;
+  margin: 0.2rem auto 0.1rem;
+  border-bottom: 1px solid var(--border);
+}
+.kind-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: -1px;               /* своя черта ложится поверх общей */
+  padding: 0.5rem 0.9rem;
+  border-bottom: 2px solid transparent;
+  border-radius: 8px 8px 0 0;
+  color: var(--muted);
+  font-size: 1.02rem;
+}
+.kind-tab:hover { color: var(--fg); }
+.kind-tab.active { color: var(--fg); font-weight: bold; border-bottom-color: var(--accent); }
+.kind-tab .ico { width: 1.05em; height: 1.05em; }
+.kind-n { font-size: 0.76rem; font-weight: normal; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* подпись типа рядом с названием: «Статья · 14 мин», «Книга · 37 глав» */
+.kind-tag {
+  display: inline-block;
+  padding: 0.02rem 0.42rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: normal;
+  line-height: 1.5;
+  white-space: nowrap;
+  vertical-align: 0.06em;
+}
+
+/* запрос нашёлся в соседней вкладке */
+.shelf-other {
+  display: block;
+  max-width: 46rem;
+  margin: 0.7rem auto 0;
+  padding: 0.45rem 0.7rem;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--accent);
+  font-size: 0.9rem;
+  text-align: start;
+}
+
+/* лента статей: заголовок и аннотация важнее картинки */
+.artfeed { max-width: 46rem; margin: 0.3rem auto 0; display: flex; flex-direction: column; }
+.art-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.95rem;
+  width: 100%;
+  padding: 0.95rem 0.35rem;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  text-align: start;
+}
+.art-card:last-of-type { border-bottom: none; }
+.art-card:hover { background: var(--active-bg); }
+/* та же обложка, что у книги, но плоская: без корешка, блика, тени и полки */
+.art-thumb {
+  flex: 0 0 auto;
+  display: block;
+  width: 62px;
+  aspect-ratio: 5 / 7.4;
+  margin-top: 0.15rem;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--border);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg) 10%, transparent);
+}
+.art-thumb img, .art-thumb .cover-gen { display: block; width: 100%; height: 100%; object-fit: cover; }
+.art-thumb .cover-gen { display: flex; font-size: 0.46rem; padding: 0.25rem; gap: 0.15rem; }
+.art-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 0.28rem; }
+.art-card-title { font-size: 1.14rem; font-weight: bold; line-height: 1.28; text-wrap: balance; }
+.art-desc {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--fg) 80%, var(--muted));
+  font-size: 0.93rem;
+  line-height: 1.45;
+}
+.art-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.2rem 0.6rem;
+  margin-top: 0.1rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+.art-read { color: var(--accent); }
+.art-status { display: inline-flex; gap: 0.25rem; }
+.art-status .review-badge, .art-info .review-badge { position: static; box-shadow: none; }
+@media (min-width: 600px) {
+  .art-card { gap: 1.15rem; padding: 1.1rem 0.5rem; }
+  .art-thumb { width: 74px; }
+  .art-card-title { font-size: 1.22rem; }
+  .art-desc { -webkit-line-clamp: 3; }
+}
+
+/* шапка статьи: название, автор, дата и время чтения, аннотация; обложка — небольшой
+   иллюстрацией сбоку. Отступы — как у абзаца (.pair), чтобы текст шапки стоял на одной
+   вертикали с текстом статьи. */
+.art-head {
+  margin: 0.9rem 0 0.6rem;
+  padding: 0 calc(0.7rem + 3px) 1.2rem;
+  border-bottom: 1px solid var(--border);
+}
+.art-head-row { display: flex; align-items: flex-start; gap: 1rem; }
+.art-cover {
+  flex: 0 0 auto;
+  width: 78px;
+  aspect-ratio: 5 / 7.4;
+  padding: 0;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--border);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg) 10%, transparent);
+  cursor: zoom-in;
+}
+.art-cover img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.art-head-main { flex: 1 1 auto; min-width: 0; }
+.art-title { margin: 0 0 0.35rem; font-size: 1.6rem; line-height: 1.18; text-wrap: balance; }
+.art-by { font-size: 0.98rem; }
+.art-info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.6rem;
+  margin-top: 0.3rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.art-info .review-badge { font-size: 0.72rem; }
+.art-lead {
+  margin: 1rem 0 0;
+  color: color-mix(in srgb, var(--fg) 86%, var(--muted));
+  font-size: 0.98rem;
+  line-height: 1.55;
+}
+@media (min-width: 600px) {
+  .art-cover { width: 96px; }
+  .art-title { font-size: 1.95rem; }
+}
+
+/* заголовок раздела статьи (глава книги) — и цель перехода из оглавления */
+.art-sec {
+  margin: 2.1rem 0 0.35rem;
+  padding: 0 calc(0.7rem + 3px);
+  font-size: 1.28rem;
+  line-height: 1.3;
+  text-wrap: balance;
+  scroll-margin-top: 4.2rem;
+}
+.art-head + .art-sec { margin-top: 1.5rem; }
+.art-sec.art-l1 { font-size: 1.14rem; }
+.art-sec.art-l2, .art-sec.art-l3 { font-size: 1.04rem; }
+.art-sec.art-group {                 /* группа разделов — запись оглавления без текста */
+  margin-top: 2.6rem;
+  color: var(--accent);
+  font-size: 0.9rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.art-end { margin-top: 2.6rem; align-items: center; }
+.art-end .ch-end-prev { align-self: center; color: var(--accent); }

@@ -19,6 +19,8 @@
 const fs = require('fs');
 const path = require('path');
 
+const { посчитать } = require('./gen-meta.js');
+
 const ROOT = path.join(__dirname, '..');
 const DIR = path.join(ROOT, 'books-private');
 
@@ -44,6 +46,12 @@ for (const name of fs.readdirSync(DIR).sort()) {
   if (m.author) entry.authors = [m.author];
   if (Array.isArray(m.authors) && m.authors.length) entry.authors = m.authors;
   if (m.description) entry.description = m.description;
+  /* Тип записи и дата. У публичных книг они ведутся в реестре руками; здесь реестр
+     целиком выводится из манифестов, поэтому и берутся из манифеста: "kind": "article"
+     и "date": "ГГГГ-ММ-ДД" в book.json непубличной книги. */
+  if (m.kind) entry.kind = m.kind;
+  if (m.date) entry.date = m.date;
+  entry.counts = посчитать(path.join(DIR, name), m);   // главы и слова — для подписи типа и времени чтения
   if (fs.existsSync(path.join(DIR, name, 'cover.jpg'))) entry.cover = `books-private/${name}/cover.jpg`;
   // миниатюра для полки — её создаёт tools/gen-thumbs.js
   if (entry.cover && fs.existsSync(path.join(DIR, name, 'cover-thumb.jpg'))) entry.thumb = `books-private/${name}/cover-thumb.jpg`;

@@ -27,6 +27,7 @@ const DEFAULTS = {
                           можем, и редкие механические сдвиги там встречаются. Данные
                           при этом остаются дословными — снятие только при показе. */
   shelfCat: [],        // выбранный путь в дереве категорий ([] = корень)
+  shelfKind: 'book',   // вкладка полки: book (книги) | article (статьи)
   shelfFacets: {},     // активные фасеты: { langs:[], authors:[], era:[], tags:[] }
   last: {},            // bookId → { chapter, sector, page, ts }
   readDays: [],        // ['YYYY-MM-DD', …] — дни, когда что-то читали
@@ -171,8 +172,32 @@ let chapterIndex = 0;
 let pairs = [];           // модель текущей главы
 let warnings = [];
 let activeEl = null;      // DOM активной пары
-let fnJump = null;        // { originId, fn } для механики «скачок-возврат»
+let fnJump = null;        // { origin, fn } для механики «скачок-возврат»
 const chapterCache = new Map(); // "<bookId>/<file>" → { pairs, warnings }
+
+/* ===== что лежит в потоке: глава книги или вся статья =====
+ * Книга читается по главам: в потоке одна глава, её номер — `chapterIndex`.
+ * Статья ("kind": "article" в реестре) читается одной страницей: в потоке все её главы
+ * подряд, как разделы с заголовками, а `chapterIndex` следует за разделом у центра
+ * экрана (updateActive). Формат текста у обоих один — Контракт; различается подача.
+ *
+ * ⚠️ Отсюда правило для всего, что ищет место в тексте: сектор `s003` и сноска `fn1`
+ * есть в КАЖДОЙ главе, поэтому искать по одному id нельзя — только по паре
+ * «глава + id» (pairAt, pairsOf, chapterOf). Поиск по одному id в статье молча
+ * находит первый раздел, где такой сектор есть, — то есть чужой абзац. */
+let bookEntry = null;      // запись реестра открытой книги: тип, дата, обложка, счётчики
+let singlePage = false;    // открыта статья — все главы лежат в одном потоке
+let streamChapters = [];   // главы в потоке статьи, по порядку
+let articleShown = null;   // id статьи, чей поток отрисован (переход к разделу — прокрутка, не перерисовка)
+let fnShown = null;        // сквозные номера сносок статьи: "глава|язык|номер" → показанный номер
+const inStream = () => (singlePage ? streamChapters : [chapterIndex]);
+const chapterData = ci => {
+  const ch = book && book.chapters[ci];
+  return (ch && chapterCache.get(bookId + '/' + ch.file)) || null;
+};
+// пары и замечания главы — из кеша: глава в потоке, значит, уже загружена
+const pairsOf = ci => (chapterData(ci) || {}).pairs || [];
+const warningsOf = ci => (chapterData(ci) || {}).warnings || [];
 
 const $ = s => document.querySelector(s);
 const stream = $('#stream');
@@ -226,7 +251,6 @@ function pickTitle(t) {
   return t[trans] || t[orig] || '';
 }
 
-// поиск пары по id сравнением dataset (без построения CSS-селектора из данных)
 /* Глава пары, а не глобальная `chapterIndex`.
  *
  * Раньше номер главы брали из состояния приложения — и он попадал прямо в
@@ -239,28 +263,23 @@ function pickTitle(t) {
  * вариантом: для случаев, когда пары под рукой нет (перевод без активной пары).
  */
 function chapterOf(el) {
-  const пара = el && (el.closest ? el.closest('.pair') : null);
-  const n = пара && Number(пара.dataset.chapter);
+  // развёрнутая под абзацем сноска (.fn-inline) — не .pair, но главу своего абзаца знает
+  const пара = el && (el.closest ? el.closest('.pair, .fn-inline') : null);
+  const n = пара && пара.dataset.chapter != null ? Number(пара.dataset.chapter) : NaN;
   return Number.isInteger(n) ? n : chapterIndex;
 }
 
-function pairById(id) {
-  if (!id) return null;
-  for (const el of stream.querySelectorAll('.pair')) if (el.dataset.id === id) return el;
-  return null;
-}
-
-/* Пара по главе И сектору. `s003` есть в каждой главе, поэтому искать только по
-   сектору можно, лишь пока в потоке одна глава. Пометки знают свою главу — вот
-   по ней и ищем. */
+/* Пара по главе И сектору. `s003` есть в каждой главе, а в потоке статьи лежат все
+   главы сразу — поэтому поиска по одному сектору нет вовсе (был `pairById`, убран
+   14.11.2026). Сравниваем dataset, а не строим CSS-селектор из данных. */
 function pairAt(глава, id) {
   if (!id) return null;
   for (const el of stream.querySelectorAll('.pair'))
     if (el.dataset.id === id && Number(el.dataset.chapter) === Number(глава)) return el;
   return null;
 }
-function scrollToPair(id, smooth) {
-  const el = pairById(id);
+function scrollToPair(id, smooth, глава = chapterIndex) {
+  const el = pairAt(глава, id);
   if (el) { el.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'start' }); flash(el); }
   return el;
 }
@@ -269,10 +288,12 @@ let loading = false; // глава грузится/перерисовывает
 // стрелки разделов: прячем ‹ на первой главе и › на последней (видимость, чтобы
 // индикатор страницы не съезжал)
 function updateChapterNav() {
-  $('#btn-prev').classList.toggle('nav-hidden', !book || nextReadable(chapterIndex, -1) < 0);
-  $('#btn-next').classList.toggle('nav-hidden', !book || nextReadable(chapterIndex, 1) < 0);
+  const нет = !book || singlePage;   // статья идёт одной страницей — листать главы нечем
+  $('#btn-prev').classList.toggle('nav-hidden', нет || nextReadable(chapterIndex, -1) < 0);
+  $('#btn-next').classList.toggle('nav-hidden', нет || nextReadable(chapterIndex, 1) < 0);
 }
 async function loadChapter(i, targetId) {
+  if (singlePage) return loadArticle(i, targetId);
   // запись-группа (без файла) не читается — перейти к ближайшей читаемой
   if (book.chapters[i] && !chHasFile(book.chapters[i])) {
     const r = nextReadable(i, 1); i = r >= 0 ? r : nextReadable(i, -1);
@@ -308,6 +329,178 @@ async function loadChapter(i, targetId) {
   loading = false;
   applyPendingHit();
   updateActive();
+}
+
+/* Статья одной страницей. Все её главы грузятся разом и ложатся в один поток; дальше
+   «перейти к главе» значит прокрутить к разделу, а не перерисовать. Порциями не грузим:
+   вся статья — десятки килобайт текста и десяток файлов, а чтение без разрывов и есть то,
+   ради чего статья отделена от книги. Книге это не годится: глав десятки, и в DOM за
+   долгое чтение накопилась бы она вся (BACKLOG, «Непрерывное чтение», шаги 3–4). */
+async function loadArticle(ci, targetId) {
+  const читаемые = [];
+  book.chapters.forEach((ch, k) => { if (chHasFile(ch)) читаемые.push(k); });
+  if (!читаемые.includes(ci)) {            // запись-группа или номер мимо — ближайший раздел с текстом
+    const дальше = читаемые.find(k => k > ci);
+    ci = дальше != null ? дальше : читаемые[читаемые.length - 1];
+  }
+  const заново = articleShown !== bookId;
+  if (заново) {
+    loading = true;
+    $('#chapter-title').textContent = 'Загрузка…';
+    const моя = bookId;
+    const ок = await Promise.all(читаемые.map(k => loadChapterData(k).then(() => true, () => false)));
+    if (моя !== bookId || !book) return;   // пока грузилось, ушли на полку или в другую запись
+    streamChapters = читаемые.filter((_, n) => ок[n]);
+    if (!streamChapters.length) {
+      showLoadError('Не удалось загрузить статью.');
+      $('#chapter-title').textContent = pickTitle(book.title);
+      loading = false;
+      return;
+    }
+    if (!streamChapters.includes(ci)) ci = streamChapters[0];
+    chapterIndex = ci;
+    pairs = pairsOf(ci);
+    warnings = [];
+    for (const k of streamChapters) for (const w of warningsOf(k)) warnings.push(`${book.chapters[k].file}: ${w}`);
+    if (warnings.length) console.warn('Контракт:', warnings);
+    updateChapterNav();
+    renderChapter();
+    articleShown = bookId;
+    ensureGlossChapter();
+    if (typeof clearMtSel === 'function') clearMtSel();
+    renderDebug();
+    recordReadDay();
+    if (!getLast(bookId)) setLast(bookId, { chapter: ci });
+    saveSettings();
+  }
+  /* Место: названный абзац, если он нашёлся; иначе заголовок раздела; первый раздел —
+     самый верх, к шапке статьи. При первом показе встаём сразу: плавная прокрутка через
+     всю статью — секунда мелькания, и по дороге в «последнее место» записались бы
+     промежуточные абзацы. */
+  const behavior = заново ? 'instant' : 'smooth';
+  if (!заново) await settleBack();   // панель оглавления ещё закрывается — см. settleBack
+  const el = targetId ? pairAt(ci, targetId) : null;
+  const раздел = stream.querySelector(`.art-sec[data-sec="${ci}"]`);
+  if (el) { el.scrollIntoView({ behavior, block: 'start' }); flash(el); }
+  else if (раздел && ci !== streamChapters[0]) раздел.scrollIntoView({ behavior, block: 'start' });
+  else window.scrollTo({ top: 0, behavior });
+  loading = false;
+  markTocCurrent();
+  applyPendingHit();
+  updateActive();
+}
+
+/* Шапка статьи. Статья открывается сразу в текст, минуя карточку книги, поэтому всё, что
+   у книги показывает карточка, — название, автор, отметки, аннотация — стоит здесь.
+   Обложка — небольшой иллюстрацией сбоку (решение автора, 14.11.2026): нажатие открывает
+   её крупно. Нет обложки — шапка просто из текста: рисованная заглушка нужна ленте, чтобы
+   карточки были одного роста, а здесь она только заняла бы место.
+   Не .pair: в активную пару, закладки и прогресс не попадает. */
+function articleHead() {
+  const e = bookEntry || {};
+  const head = document.createElement('header');
+  head.className = 'art-head';
+  const row = document.createElement('div');
+  row.className = 'art-head-row';
+  if (e.cover) {
+    const cov = document.createElement('button');
+    cov.type = 'button';
+    cov.className = 'art-cover';
+    cov.title = 'Обложка — открыть крупно';
+    cov.setAttribute('aria-label', cov.title);
+    const img = document.createElement('img');
+    img.alt = ''; img.decoding = 'async';
+    img.onerror = () => {
+      if (e.thumb && img.dataset.full !== '1') { img.dataset.full = '1'; img.src = e.cover; return; }
+      cov.remove();
+    };
+    img.src = e.thumb || e.cover;
+    cov.appendChild(img);
+    cov.addEventListener('click', () => showImage(e.cover));
+    row.appendChild(cov);
+  }
+  const main = document.createElement('div');
+  main.className = 'art-head-main';
+  const h = document.createElement('h1');
+  h.className = 'art-title';
+  setTextSlw(h, pickTitle(book.title));
+  main.appendChild(h);
+  const автор = plainOf(book.author) || (Array.isArray(e.authors) ? e.authors.filter(Boolean).join(', ') : '');
+  if (автор) {
+    const a = document.createElement('div');
+    a.className = 'art-by';
+    a.textContent = автор;
+    main.appendChild(a);
+  }
+  const info = document.createElement('div');
+  info.className = 'art-info';
+  const биты = [entryDate(e, true), readTime(e)].filter(Boolean);
+  if (биты.length) { const t = document.createElement('span'); t.textContent = биты.join(' · '); info.appendChild(t); }
+  // одобрение и «в работе»; «Готово» здесь не пишем: выложенная статья готова по умолчанию
+  const одобрение = e.review && APPROVAL[e.review];
+  if (одобрение) info.appendChild(badgeEl(одобрение, true));
+  if (e.progress === 'wip') info.appendChild(badgeEl(PROGRESS.wip, true));
+  if (info.childNodes.length) main.appendChild(info);
+  row.appendChild(main);
+  head.appendChild(row);
+  const аннотация = plainOf(book.description) || plainOf(e.description);
+  if (аннотация) {
+    const p = document.createElement('p');
+    p.className = 'art-lead';
+    setTextSlw(p, аннотация);
+    head.appendChild(p);
+  }
+  return head;
+}
+
+// заголовок раздела статьи (глава книги) или группы разделов (запись без файла)
+function sectionHead(k) {
+  const ch = book.chapters[k];
+  const h = document.createElement('h2');
+  h.className = 'art-sec art-l' + chLevel(ch) + (chHasFile(ch) ? '' : ' art-group');
+  h.dataset.sec = k;
+  setTextSlw(h, pickTitle(ch.title || {}));
+  return h;
+}
+
+// конец статьи: дальше только сноски; перехода «Следующая глава» у статьи нет
+function articleEnd() {
+  const nav = document.createElement('nav');
+  nav.className = 'ch-end art-end';
+  const end = document.createElement('div');
+  end.className = 'ch-end-done';
+  end.textContent = 'Конец статьи';
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'ch-end-prev';
+  b.textContent = '← Все статьи';
+  b.addEventListener('click', () => { history.pushState({}, '', location.pathname); renderLibrary(); });
+  nav.append(end, b);
+  return nav;
+}
+
+/* Сквозная нумерация сносок статьи. В файлах счёт сносок в каждой главе свой, с единицы
+   (Контракт, 3.3), а статья — одна страница: «¹» в третьем разделе и снова «¹» в четвёртом
+   читались бы как одна и та же сноска. Поэтому показываем номер по порядку во всей статье;
+   в данных и в `data-fn` остаётся номер из файла — по нему сноска и находится. */
+function numberFootnotes(главы) {
+  const карта = new Map(), счёт = {};
+  for (const ci of главы) for (const p of pairsOf(ci)) {
+    if (p.type !== 'footnote') continue;
+    const язык = p.lang || '';
+    счёт[язык] = (счёт[язык] || 0) + 1;
+    карта.set(ci + '|' + язык + '|' + p.id.slice(2), String(счёт[язык]));
+  }
+  return карта;
+}
+const fnNumber = (ci, lang, n) => (fnShown && fnShown.get(ci + '|' + (lang || '') + '|' + n)) || String(n);
+// проставить показанные номера на ссылках-сносках внутри блока (абзац, сноска, развёрнутая сноска)
+function showFnNumbers(root, ci) {
+  if (!fnShown) return;
+  root.querySelectorAll('.member').forEach(mem => {
+    const lang = mem.getAttribute('lang');
+    mem.querySelectorAll('.fnref').forEach(ref => { ref.textContent = fnNumber(ci, lang, ref.dataset.fn); });
+  });
 }
 
 /* Конец текста главы: явная кнопка «Следующая глава» с её названием (и скромная «назад»).
@@ -360,73 +553,99 @@ function buildMembers(pair, target) {
   }
 }
 
+/* Одна пара потока. `ci` — глава пары: в книге это текущая глава, в статье — её раздел. */
+function pairElement(pair, ci) {
+  const el = document.createElement('article');
+  el.className = 'pair' + (pair.type === 'footnote' ? ' is-footnote' : '');
+  el.dataset.chapter = ci;   // см. chapterOf: глава — свойство пары
+  el.dataset.id = pair.id + (pair.lang ? '@' + pair.lang : ''); // сноски пер-язычные → id уникален
+  if (pair.page != null) el.dataset.page = pair.page;
+  if (pair.type === 'footnote') {
+    el.dataset.fn = pair.id.slice(2);
+    if (pair.lang) el.dataset.fnlang = pair.lang;
+    const label = document.createElement('div');
+    label.className = 'fn-label';
+    const num = document.createElement('span');
+    num.textContent = `[${fnNumber(ci, pair.lang, pair.id.slice(2))}]`;
+    const back = document.createElement('button');
+    back.type = 'button';
+    back.className = 'fn-back';
+    back.textContent = '← вернуться к тексту';
+    back.hidden = true;
+    label.append(num, ' ', back);
+    el.appendChild(label);
+  }
+  buildMembers(pair, el);
+  showFnNumbers(el, ci);   // статья: номера сносок — сквозные (numberFootnotes)
+  // к абзацу есть статья шарха (заметка «Шарх: …» в мастере) и у книги объявлена
+  // книга шарха — значок на полях; без book.sharh открыть было бы нечего
+  if (pair.type === 'text' && book.sharh && pair.sharh && pair.sharh.length) {
+    const mark = document.createElement('button');
+    mark.type = 'button';
+    mark.className = 'sharh-mark';
+    mark.appendChild(svgIco('bulb'));
+    mark.title = 'Шарх: ' + pair.sharh.join('; ');
+    mark.setAttribute('aria-label', mark.title);
+    el.classList.add('has-sharh');
+    el.appendChild(mark);
+  }
+  // односторонние текст-сектора — во всю ширину: основной текст книги (есть
+  // только перевод) ИЛИ оригинал, перевод которого ещё не готов («awaiting»).
+  // Помечаем структурно (по наличию контента), чтобы пережить смену видимости;
+  // саму метку «идёт перевод» показывает CSS только в параллельном режиме.
+  if (pair.type === 'text') {
+    const present = book.languages.filter(l => pair[l] != null);
+    if (present.length === 1) {
+      el.classList.add('solo');
+      if (present[0] === book.languages[0] && book.languages.length > 1) {
+        el.classList.add('awaiting');
+        el.title = 'Перевод готовится';
+      }
+    }
+  }
+  return el;
+}
+
+/* Отрисовка потока. Книга — одна глава: текст, «Следующая глава», сноски главы. Статья —
+   шапка, все разделы подряд под своими заголовками, «Конец статьи», сноски всей статьи
+   одним списком (у статьи они концевые, а не поглавные). */
 function renderChapter() {
   detachMtCard();          // иначе innerHTML = '' уничтожит карточку вместе с обработчиками
   stream.innerHTML = '';
   activeEl = null;
   applyHlMode();
   fnJump = null;
-  let fnDividerDone = false;
-  for (const pair of pairs) {
-    if (pair.type === 'footnote' && !fnDividerDone) {
-      stream.appendChild(chapterEndNav());
-      const h = document.createElement('h2');
-      h.className = 'fn-divider';
-      h.textContent = 'Сноски';
-      stream.appendChild(h);
-      fnDividerDone = true;
-    }
-    const el = document.createElement('article');
-    el.className = 'pair' + (pair.type === 'footnote' ? ' is-footnote' : '');
-    el.dataset.chapter = chapterIndex;   // см. chapterOf: глава — свойство пары
-    el.dataset.id = pair.id + (pair.lang ? '@' + pair.lang : ''); // сноски пер-язычные → id уникален
-    if (pair.page != null) el.dataset.page = pair.page;
-    if (pair.type === 'footnote') {
-      el.dataset.fn = pair.id.slice(2);
-      if (pair.lang) el.dataset.fnlang = pair.lang;
-      const label = document.createElement('div');
-      label.className = 'fn-label';
-      const num = document.createElement('span');
-      num.textContent = `[${pair.id.slice(2)}]`;
-      const back = document.createElement('button');
-      back.type = 'button';
-      back.className = 'fn-back';
-      back.textContent = '← вернуться к тексту';
-      back.hidden = true;
-      label.append(num, ' ', back);
-      el.appendChild(label);
-    }
-    buildMembers(pair, el);
-    // к абзацу есть статья шарха (заметка «Шарх: …» в мастере) и у книги объявлена
-    // книга шарха — значок на полях; без book.sharh открыть было бы нечего
-    if (pair.type === 'text' && book.sharh && pair.sharh && pair.sharh.length) {
-      const mark = document.createElement('button');
-      mark.type = 'button';
-      mark.className = 'sharh-mark';
-      mark.appendChild(svgIco('bulb'));
-      mark.title = 'Шарх: ' + pair.sharh.join('; ');
-      mark.setAttribute('aria-label', mark.title);
-      el.classList.add('has-sharh');
-      el.appendChild(mark);
-    }
-    // односторонние текст-сектора — во всю ширину: основной текст книги (есть
-    // только перевод) ИЛИ оригинал, перевод которого ещё не готов («awaiting»).
-    // Помечаем структурно (по наличию контента), чтобы пережить смену видимости;
-    // саму метку «идёт перевод» показывает CSS только в параллельном режиме.
-    if (pair.type === 'text') {
-      const present = book.languages.filter(l => pair[l] != null);
-      if (present.length === 1) {
-        el.classList.add('solo');
-        if (present[0] === book.languages[0] && book.languages.length > 1) {
-          el.classList.add('awaiting');
-          el.title = 'Перевод готовится';
-        }
+  document.body.classList.toggle('single-page', singlePage);
+  const главы = inStream();
+  fnShown = singlePage ? numberFootnotes(главы) : null;
+  const сноски = [];
+  let текста = 0;
+  if (singlePage) {
+    stream.appendChild(articleHead());
+    // заголовки идут по манифесту, чтобы группы (записи без файла) встали на свои места
+    book.chapters.forEach((ch, k) => {
+      if (chHasFile(ch) && !главы.includes(k)) return;      // раздел не загрузился
+      stream.appendChild(sectionHead(k));
+      for (const pair of pairsOf(k)) {
+        if (pair.type === 'footnote') { сноски.push([k, pair]); continue; }
+        stream.appendChild(pairElement(pair, k)); текста++;
       }
+    });
+  } else {
+    for (const pair of pairs) {
+      if (pair.type === 'footnote') { сноски.push([chapterIndex, pair]); continue; }
+      stream.appendChild(pairElement(pair, chapterIndex)); текста++;
     }
-    stream.appendChild(el);
   }
-  if (pairs.length && !fnDividerDone) stream.appendChild(chapterEndNav());
-  if (!pairs.length) {
+  if (текста || сноски.length) stream.appendChild(singlePage ? articleEnd() : chapterEndNav());
+  if (сноски.length) {
+    const h = document.createElement('h2');
+    h.className = 'fn-divider';
+    h.textContent = 'Сноски';
+    stream.appendChild(h);
+    for (const [k, pair] of сноски) stream.appendChild(pairElement(pair, k));
+  }
+  if (!текста && !сноски.length) {
     const note = document.createElement('div');
     note.className = 'load-error';
     note.textContent =
@@ -518,17 +737,39 @@ function updateActive() {
     if (activeEl) activeEl.classList.add('active');
     updateBookmarkBtn();
   }
+  if (singlePage && book) followSection();
   updateProgress();
   updatePageIndicator();
   rememberPosition();
 }
 
+/* Статья: «текущая глава» — раздел абзаца у центра экрана. За ней следуют отметка в
+   оглавлении и заголовок в шапке: наверху, пока видна шапка статьи, там её название,
+   дальше — название раздела, чтобы на длинной странице было видно, где находишься. */
+function followSection() {
+  if (activeEl) {
+    const ci = chapterOf(activeEl);
+    if (ci !== chapterIndex) { chapterIndex = ci; pairs = pairsOf(ci); markTocCurrent(); }
+  }
+  const шапка = stream.querySelector('.art-head');
+  const вверху = !activeEl || (шапка && шапка.getBoundingClientRect().bottom > 70);
+  const t = pickTitle((вверху ? book.title : (book.chapters[chapterIndex] || {}).title) || book.title);
+  const el = $('#chapter-title');
+  if (el.textContent !== t) el.textContent = t;
+}
+
 let bookPct = 0;
 function updateProgress() {
   if (!book || !book.chapters.length) { bookPct = 0; return; }
-  const max = document.documentElement.scrollHeight - window.innerHeight;
-  const cf = max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0;
-  bookPct = Math.round(((chapterIndex + cf) / book.chapters.length) * 100);
+  /* У книги прогресс — глава плюс доля главы. У статьи — доля прокрутки до КОНЦА ТЕКСТА,
+     а не до конца страницы: ниже лежат сноски всей статьи (у «Фатихи» это половина
+     объёма), и с ними дочитанная статья показывала бы 60%. */
+  const конец = singlePage ? stream.querySelector('.art-end') : null;
+  const max = конец
+    ? конец.getBoundingClientRect().bottom + window.scrollY - window.innerHeight
+    : document.documentElement.scrollHeight - window.innerHeight;
+  const cf = max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : (singlePage ? 1 : 0);
+  bookPct = Math.round((singlePage ? cf : (chapterIndex + cf) / book.chapters.length) * 100);
   document.body.style.setProperty('--progress', bookPct + '%');
 }
 
@@ -536,7 +777,9 @@ function updateProgress() {
 let posSaveTick = null;
 function rememberPosition() {
   if (!book || !activeEl || loading) return; // во время загрузки activeEl может быть из старой главы
-  setLast(bookId, { chapter: chapterOf(activeEl), sector: activeEl.dataset.id, page: currentPage(), ts: Date.now() });
+  const место = { chapter: chapterOf(activeEl), sector: activeEl.dataset.id, page: currentPage(), ts: Date.now() };
+  if (singlePage) место.pct = bookPct;   // статья: доля прочитанного — для ленты и чтобы дочитанную открыть сначала
+  setLast(bookId, место);
   if (posSaveTick) clearTimeout(posSaveTick);
   posSaveTick = setTimeout(saveSettings, 500);
 }
@@ -905,11 +1148,14 @@ function toggleInlineFn(afterEl, n, lang) {
     if (sib.dataset.fn === n && sib.dataset.fnlang === lang) { sib.remove(); return; }
     sib = sib.nextElementSibling;
   }
-  const fnPair = pairs.find(p => p.type === 'footnote' && p.id === 'fn' + n && p.lang === lang);
+  // сноска ищется в главе своего абзаца: `fn1` есть в каждой главе статьи
+  const глава = chapterOf(afterEl);
+  const fnPair = pairsOf(глава).find(p => p.type === 'footnote' && p.id === 'fn' + n && p.lang === lang);
   const box = document.createElement('aside');
   box.className = 'fn-inline';
   box.dataset.fn = n;
   box.dataset.fnlang = lang;
+  box.dataset.chapter = глава;   // сноска на сноску внутри неё ищется в той же главе (chapterOf)
   if (!fnPair) {
     const div = document.createElement('div');
     div.className = 'fn-missing';
@@ -918,9 +1164,10 @@ function toggleInlineFn(afterEl, n, lang) {
   } else {
     const label = document.createElement('div');
     label.className = 'fn-label';
-    label.textContent = `[${n}]`;
+    label.textContent = `[${fnNumber(глава, lang, n)}]`;
     box.appendChild(label);
     buildMembers(fnPair, box); // раскрывается в текущей видимости языков
+    showFnNumbers(box, глава);
   }
   let anchor = afterEl;
   while (anchor.nextElementSibling && anchor.nextElementSibling.classList.contains('fn-inline')) {
@@ -931,11 +1178,12 @@ function toggleInlineFn(afterEl, n, lang) {
 }
 
 function jumpToFn(originBlock, n, lang) {
-  const target = stream.querySelector(`.pair.is-footnote[data-fn="${n}"][data-fnlang="${lang}"]`)
-    || stream.querySelector(`.pair.is-footnote[data-fn="${n}"]`);
+  const гл = `[data-chapter="${chapterOf(originBlock)}"]`;   // сноска своей главы, а не первая с таким номером
+  const target = stream.querySelector(`.pair.is-footnote${гл}[data-fn="${n}"][data-fnlang="${lang}"]`)
+    || stream.querySelector(`.pair.is-footnote${гл}[data-fn="${n}"]`);
   if (!target) { toggleInlineFn(originBlock, n, lang); return; } // битая ссылка — покажем сообщение
-  const originPair = findPairElBack(originBlock);
-  fnJump = { originId: originPair ? originPair.dataset.id : null, fn: n };
+  // помним сам абзац, а не его id: `s003` в статье есть в каждом разделе
+  fnJump = { origin: findPairElBack(originBlock), fn: n };
   stream.querySelectorAll('.fn-back').forEach(b => { b.hidden = true; });
   const back = target.querySelector('.fn-back');
   if (back) back.hidden = false;
@@ -945,8 +1193,8 @@ function jumpToFn(originBlock, n, lang) {
 
 function returnFromFn(btn) {
   btn.hidden = true;
-  if (!fnJump || !fnJump.originId) return;
-  const origin = pairById(fnJump.originId);
+  if (!fnJump || !fnJump.origin) return;
+  const origin = fnJump.origin.isConnected ? fnJump.origin : null;
   if (origin) {
     origin.scrollIntoView({ behavior: 'smooth', block: 'center' });
     origin.querySelectorAll(`.fnref[data-fn="${fnJump.fn}"]`).forEach(flash);
@@ -992,6 +1240,8 @@ function buildToc() {
   const f = $('#toc-filter');
   if (f) { f.value = ''; f.hidden = book.chapters.length < 12; }  // на короткой книге незачем
   $('#toc-book-title').textContent = pickTitle(book.title);
+  const подзаголовок = $('#toc-sub');
+  if (подзаголовок) подзаголовок.textContent = singlePage ? 'Разделы' : 'Главы';
   tocRangesFilled = false;
   renderTocList();
 }
@@ -1360,7 +1610,8 @@ function toggleActiveBookmark() {
 
 function updateBookmarkBtn() {
   const btn = $('#btn-bookmark');
-  const on = !!(book && activeEl && getMarks().some(m => !isClip(m) && m.sector === activeEl.dataset.id && m.chapter === chapterIndex));
+  const глава = activeEl ? chapterOf(activeEl) : chapterIndex;
+  const on = !!(book && activeEl && getMarks().some(m => !isClip(m) && m.sector === activeEl.dataset.id && m.chapter === глава));
   btn.classList.toggle('active-mark', on);
   btn.title = on ? 'Убрать закладку' : 'Закладка на текущем месте';
 }
@@ -1384,12 +1635,20 @@ function removeMark(mid) {
 function gotoSector(secId, chapter) {
   $('#toc').hidden = true;
   consumeOverlayMark();
-  if (chapter === chapterIndex) scrollToPair(secId, true);
-  else loadChapter(chapter, secId);
+  // абзац уже в потоке (та же глава книги или любой раздел статьи) — просто прокрутить
+  if (inStream().includes(chapter) && pairAt(chapter, secId)) {
+    settleBack().then(() => scrollToPair(secId, true, chapter));
+    return;
+  }
+  loadChapter(chapter, secId);
 }
 
-function shareSector(secId) {
-  const url = location.origin + location.pathname + '?book=' + encodeURIComponent(bookId) + '&s=' + encodeURIComponent(secId);
+/* Ссылка на абзац. `c` — номер главы с единицы: сектор `s004` есть в каждой главе, и без
+   главы ссылка открывала первую главу, где такой сектор нашёлся, — обычно не ту. Старые
+   ссылки без `c` работают как раньше (route → chapterOfSector). */
+function shareSector(secId, chapter, bid = bookId) {
+  const url = location.origin + location.pathname + '?book=' + encodeURIComponent(bid)
+    + (Number.isInteger(chapter) ? '&c=' + (chapter + 1) : '') + '&s=' + encodeURIComponent(secId);
   if (navigator.clipboard) navigator.clipboard.writeText(url).then(() => toast('Ссылка скопирована'), () => toast(url));
   else toast(url);
 }
@@ -1436,9 +1695,11 @@ function openMarkEditor(mid, { focusNote = false, bookOf = bookId } = {}) {
    а в панели внутри книги оно только шумит — и так понятно, где находишься. */
 function markPlace(bid, m, withBook = false) {
   const parts = [];
-  if (withBook || bid !== bookId) parts.push(bookTitleById(bid));
+  const e = library.find(b => b.id === bid);
+  // в списке вырезок книги и статьи вперемешку — подпись типа сразу за названием
+  if (withBook || bid !== bookId) { parts.push(bookTitleById(bid)); if (e) parts.push(kindLabel(e)); }
   if (bid === bookId && book && book.chapters[m.chapter]) parts.push(pickTitle(book.chapters[m.chapter].title));
-  else parts.push('гл. ' + (m.chapter + 1));
+  else parts.push((kindOf(e) === 'article' ? 'разд. ' : 'гл. ') + (m.chapter + 1));
   if (m.page != null) parts.push('стр. ' + m.page);
   return parts.join(' · ');
 }
@@ -1606,7 +1867,7 @@ function markRow(m, bid, { compact = false } = {}) {
   share.type = 'button';
   share.title = 'Скопировать ссылку';
   share.appendChild(svgIco('linkout'));
-  share.addEventListener('click', () => shareSector(m.sector));
+  share.addEventListener('click', () => shareSector(m.sector, m.chapter, bid));
   const del = document.createElement('button');
   del.type = 'button';
   del.title = 'Удалить';
@@ -2170,16 +2431,17 @@ function glossLangs() {
 }
 
 const glossKey = (lang, file) => `${bookId}/${lang}/${file}`;
-const chapterFile = () => (book && book.chapters[chapterIndex] && book.chapters[chapterIndex].file) || '';
+const chapterFileOf = ci => (book && book.chapters[ci] && book.chapters[ci].file) || '';
+const chapterFile = () => chapterFileOf(chapterIndex);
 
 /* Подстрочник текущей главы. Грузится фоном: глава не должна его ждать, а когда
    файл приедет, подписи лягут на уже отрисованный текст. */
 async function ensureGlossChapter() {
-  const file = chapterFile();
+  const files = inStream().map(chapterFileOf).filter(Boolean);   // статья: главы всего потока
   const langs = glossLangs();
-  if (!file || !langs.length) { updateGlossBtn(); return; }
-  await Promise.all(langs.map(l =>
-    glLoadChapter(glossKey(l, file), `${base}gloss/${l}/${file}`, fetchBookText)));
+  if (!files.length || !langs.length) { updateGlossBtn(); return; }
+  await Promise.all(files.flatMap(file => langs.map(l =>
+    glLoadChapter(glossKey(l, file), `${base}gloss/${l}/${file}`, fetchBookText))));
   if (settings.gloss.on) applyGloss();
   updateGlossBtn();
   setupGlossSettings();
@@ -2187,11 +2449,10 @@ async function ensureGlossChapter() {
 
 // подписи есть, если хоть у одного языка главы разобрался непустой файл
 function glossReady() {
-  const file = chapterFile();
-  return glossLangs().some(l => {
-    const m = glChapter(glossKey(l, file));
+  return inStream().some(ci => glossLangs().some(l => {
+    const m = glChapter(glossKey(l, chapterFileOf(ci)));
     return m && m.size > 0;
-  });
+  }));
 }
 
 function updateGlossBtn() {
@@ -2214,12 +2475,13 @@ function applyGloss() {
   document.body.toggleAttribute('data-gloss-ok', !!(g.on && g.onlyVerified));
   applyGlossStyle();
   stream.querySelectorAll('.member').forEach(m => glClear(m));
-  if (g.on && book) {
-    const file = chapterFile();
+  if (g.on && book) for (const ci of inStream()) {
+    // подписи привязаны к сектору СВОЕЙ главы: `s003` в статье есть в каждом разделе
+    const file = chapterFileOf(ci);
     for (const lang of glossLangs()) {
       const sectors = glChapter(glossKey(lang, file));
       if (!sectors) continue;
-      for (const el of stream.querySelectorAll('.pair')) {
+      for (const el of stream.querySelectorAll(`.pair[data-chapter="${ci}"]`)) {
         const sec = sectors.get(el.dataset.id);
         if (!sec) continue;
         /* Выверенность — на секторе. «Только выверенное» просто не рисует
@@ -2389,7 +2651,7 @@ async function sharhPairs(sb, ci) {
 let sharhOrigin = null;   // абзац, от которого открыт шарх: туда вернёт «назад» из книги шарха
 function openSharhFor(btn) {
   const pairEl = btn.closest('.pair');
-  const pair = pairEl && pairs.find(p => p.type === 'text' && p.id === pairEl.dataset.id);
+  const pair = pairEl && pairsOf(chapterOf(pairEl)).find(p => p.type === 'text' && p.id === pairEl.dataset.id);
   if (!pair || !pair.sharh || !pair.sharh.length) return;
   sharhOrigin = { book: bookId, chapter: chapterOf(pairEl), sector: pair.id };
   const tabs = $('#sharh-tabs');
@@ -2828,7 +3090,7 @@ function renderClipFilters() {
   box.innerHTML = '';
 
   const bookIds = [...new Set(allMarks().map(x => x.book))];
-  box.appendChild(selectFilter('Книга', bookIds.map(id => [id, bookTitleById(id)]), clipsUI.book, v => { clipsUI.book = v; renderClips(); }));
+  box.appendChild(selectFilter('Откуда', bookIds.map(id => [id, bookTitleById(id)]), clipsUI.book, v => { clipsUI.book = v; renderClips(); }));
   const tags = allTags();
   if (tags.length) box.appendChild(selectFilter('Тег', tags.map(t => [t, t]), clipsUI.tag, v => { clipsUI.tag = v; renderClips(); }));
   const colors = [...new Set(allMarks().map(x => x.mark.color).filter(Boolean))];
@@ -3023,7 +3285,7 @@ function reportError() {
   const pairEl = el.closest('.pair');
   if (!member || !pairEl || !book || !book.feedbackEmail) return;
   const frag = sel.toString().trim().slice(0, 400);
-  const ch = book.chapters[chapterIndex];
+  const ch = book.chapters[chapterOf(pairEl)];
   const subject = `Правка: ${pickTitle(book.title)}`;
   const body = [
     `Книга: ${pickTitle(book.title)} (${bookId})`,
@@ -3043,14 +3305,14 @@ $('#sel-err').addEventListener('mousedown', e => { e.preventDefault(); reportErr
 $('#sel-err').addEventListener('touchstart', e => { e.preventDefault(); reportError(); }, { passive: false });
 
 async function gotoPage(n) {
-  const local = pairs.find(p => p.page === n);
-  if (local) {
-    scrollToPair(local.id, true);
-    return;
+  // сначала то, что уже в потоке: глава книги или все разделы статьи
+  for (const ci of inStream()) {
+    const local = pairsOf(ci).find(p => p.page === n);
+    if (local) { scrollToPair(local.id, true, ci); return; }
   }
   // нумерация сквозная по тому — ищем по остальным главам
   for (let i = 0; i < book.chapters.length; i++) {
-    if (i === chapterIndex) continue;
+    if (inStream().includes(i) || !chHasFile(book.chapters[i])) continue;
     let data;
     try { data = await loadChapterData(i); } catch { continue; }
     const hit = data.pairs.find(p => p.page === n);
@@ -3520,8 +3782,26 @@ function openOverlay(el) {
   if (!overlayMark) { overlayMark = true; history.pushState({ overlay: true }, ''); }
 }
 // вызвать после закрытия панели из UI (Esc, тап мимо, выбор пункта) — убрать маркер
+let backDone = null;       // обещание: наш history.back() отработал (popstate пришёл)
+let backResolve = null;
 function consumeOverlayMark() {
-  if (overlayMark && !anyPopupOpen()) { overlayMark = false; suppressPop = true; history.back(); }
+  if (overlayMark && !anyPopupOpen()) {
+    overlayMark = false; suppressPop = true;
+    // запасной таймер: если popstate не придёт вовсе, ждущие прокрутки не должны зависнуть
+    backDone = new Promise(res => { backResolve = res; setTimeout(res, 500); });
+    history.back();
+  }
+}
+/* Дождаться, пока отработает наш history.back(). Нужно тому, кто закрыл панель и сразу
+   прокручивает к месту В ТОМ ЖЕ потоке (раздел статьи из оглавления, пометка, попадание
+   поиска): шаг назад по истории происходит чуть позже и обрывает начатую плавную
+   прокрутку — страница замирала на полпути или не двигалась вовсе, через раз. Пока
+   переход означал перерисовку главы, этого не было видно. */
+async function settleBack() {
+  const p = backDone;
+  if (!p) return;
+  await p;
+  if (backDone === p) backDone = null;
 }
 $('#btn-toc').addEventListener('click', () => { openOverlay($('#toc')); fillPageRanges(); });
 if ($('#toc-filter')) {
@@ -3574,7 +3854,7 @@ document.addEventListener('keydown', e => {
   const tag = (e.target.tagName || '').toLowerCase();
   if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
   if (e.metaKey || e.ctrlKey || e.altKey) return;
-  if (document.body.dataset.view !== 'reading' || !book || anyPopupOpen()) return;
+  if (document.body.dataset.view !== 'reading' || !book || singlePage || anyPopupOpen()) return;
   if (e.key === 'ArrowRight') {
     const n = nextReadable(chapterIndex, 1); if (n >= 0) { loadChapter(n); e.preventDefault(); }
   } else if (e.key === 'ArrowLeft') {
@@ -3621,7 +3901,7 @@ document.addEventListener('touchend', e => {
   const dx = t.clientX - swipeX, dy = t.clientY - swipeY, dt = Date.now() - swipeT;
   const room = swipeRoom;
   swipeX = null; swipeRoom = null;
-  if (document.body.dataset.view !== 'reading' || !book || anyPopupOpen()) return;
+  if (document.body.dataset.view !== 'reading' || !book || singlePage || anyPopupOpen()) return;
   if (dt > 600 || Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 2) return; // не горизонтальный свайп
   // палец влево — содержимое едет влево, значит прокрутка вправо; и наоборот
   if (room && (dx < 0 ? room.right : room.left) > 1) return;
@@ -3791,14 +4071,40 @@ function jumpToHit(r) {
   if (r.bookId && r.bookId !== bookId) { // попадание в другой книге — открываем её
     const entry = library.find(e => e.id === r.bookId);
     if (entry) {
-      history.pushState({}, '', '?book=' + encodeURIComponent(entry.id));
-      openBook(entry, { hit: r });
+      // адрес кладём ПОСЛЕ того, как отработает шаг назад от закрытой панели поиска: иначе
+      // этот шаг съедал только что положенный адрес, и в строке оставалась полка
+      settleBack().then(() => {
+        history.pushState({}, '', '?book=' + encodeURIComponent(entry.id));
+        openBook(entry, { hit: r });
+      });
       return;
     }
   }
   pendingHit = r;
-  if (r.ci === chapterIndex) applyPendingHit();
+  if (inStream().includes(r.ci) && (!singlePage || articleShown === bookId)) settleBack().then(applyPendingHit);
   else loadChapter(r.ci, r.id);
+}
+
+/* Смещения из данных главы → смещения в показанном тексте. В статье номера сносок в тексте
+   заменены сквозными (numberFootnotes) и бывают длиннее исходных: «3» стало «12». Поиск
+   считает место попадания по данным, а красим мы показанное — без поправки подсветка
+   съезжала бы на знак за каждую такую сноску перед попаданием. */
+function shownOffsets(member, start, end) {
+  if (!fnShown) return [start, end];
+  let s = start, e = end, сдвиг = 0;
+  const до = document.createRange();
+  for (const ref of member.querySelectorAll('.fnref')) {
+    const было = ref.dataset.fn || '', стало = ref.textContent;
+    if (было.length === стало.length) continue;
+    до.selectNodeContents(member);
+    до.setEndBefore(ref);
+    const конецСсылки = до.toString().length - сдвиг + было.length;   // в исходном тексте
+    const d = стало.length - было.length;
+    if (конецСсылки <= start) s += d;
+    if (конецСсылки <= end) e += d;
+    сдвиг += d;
+  }
+  return [s, e];
 }
 
 // подсветить найденный фрагмент в нужном члене пары; раскрыть язык, если скрыт
@@ -3806,14 +4112,14 @@ function applyPendingHit() {
   const r = pendingHit;
   pendingHit = null;
   stream.querySelectorAll('mark.search-hit').forEach(unwrap);
-  if (!r || r.ci !== chapterIndex) return;
-  const pairEl = pairById(r.id + '@' + r.lang) || pairById(r.id); // сноски пер-язычные → id@lang
+  if (!r || !inStream().includes(r.ci)) return;
+  const pairEl = pairAt(r.ci, r.id + '@' + r.lang) || pairAt(r.ci, r.id); // сноски пер-язычные → id@lang
   if (!pairEl) return;
   pairEl.classList.remove('fn-hidden'); // если это сноска скрытого языка — раскроем под подсветку
   const vl = visibleLang();
   if (vl !== 'both' && vl !== r.lang) pairEl.classList.add('peek');
   const member = pairEl.querySelector(`.member.lang-${r.lang}`);
-  if (member) highlightRange(member, r.start, r.end);
+  if (member) highlightRange(member, ...shownOffsets(member, r.start, r.end));
   pairEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
   flash(pairEl);
 }
@@ -3922,7 +4228,7 @@ async function runSearch(raw) {
           const { norm, map } = normalizeWithMap(text);
           const оценка = оценить(norm, запрос);
           if (оценка) results.push({
-            bookId: entry.id, bookTitle: entryLabel(entry),
+            bookId: entry.id, bookTitle: entryLabel(entry), kind: kindLabel(entry),
             ci, chTitle: searchChapterTitle(m, ci),
             id: pair.id, lang, rtl: m.rtl.includes(lang),
             text, вес: оценка.вес,
@@ -3957,7 +4263,12 @@ function renderResults(results, label, libraryScope, capped, всего = result
 
     const meta = document.createElement('span');
     meta.className = 'search-meta';
-    meta.textContent = (libraryScope ? `${r.bookTitle} · ` : '') + `${r.chTitle} · ${r.lang.toUpperCase()}`;
+    if (libraryScope) {
+      // по всей библиотеке находятся и книги, и статьи — подпись типа рядом с названием
+      const тип = document.createElement('span'); тип.className = 'kind-tag'; тип.textContent = r.kind;
+      meta.append(r.bookTitle, ' ', тип, ' · ');
+    }
+    meta.append(`${r.chTitle} · ${r.lang.toUpperCase()}`);
     item.appendChild(meta);
 
     const snip = document.createElement('span');
@@ -3981,6 +4292,7 @@ $('#btn-search').addEventListener('click', () => {
   const bookChip = $('#search-scope').querySelector('[data-scope="book"]');
   bookChip.disabled = !bookId;
   bookChip.classList.toggle('chip-off', !bookId);
+  bookChip.textContent = bookId && kindOf(bookEntry) === 'article' ? 'Эта статья' : 'Эта книга';
   setSearchScope(bookId ? 'book' : 'library');
   openOverlay($('#search'));
   $('#search-input').focus();
@@ -4003,6 +4315,63 @@ function entryLabel(e) {
     for (const v of Object.values(e.title)) if (v) return v;
   }
   return e.id;
+}
+
+/* ===== тип записи: книга или статья =====
+ * "kind" в реестре: "article" — статья, всё остальное (и отсутствие поля) — книга.
+ * Движок и формат текста у них одни (Контракт); различается подача. Книга — много тем
+ * и главы, которые читают по отдельности: стоит обложкой на полке, открывается через
+ * карточку, читается по главам. Статья отвечает на один вопрос и читается за один
+ * присест: в ленте карточкой с заголовком и аннотацией, открывается сразу в текст,
+ * идёт одной страницей (singlePage). Обложка есть у обоих — различает их не она.
+ */
+const kindOf = e => (e && e.kind === 'article' ? 'article' : 'book');
+const KINDS = [
+  { id: 'book', tab: 'Книги', all: 'Все книги', gen: 'книг', ico: 'library' },
+  { id: 'article', tab: 'Статьи', all: 'Все статьи', gen: 'статей', ico: 'article' },
+];
+const kindMeta = id => KINDS.find(k => k.id === id) || KINDS[0];
+// вкладка полки: сохранённая, но только если записи такого типа вообще есть
+function shelfKind() {
+  const есть = k => library.some(e => kindOf(e) === k);
+  const хочу = settings.shelfKind === 'article' ? 'article' : 'book';
+  const другая = хочу === 'book' ? 'article' : 'book';
+  return есть(хочу) || !есть(другая) ? хочу : другая;
+}
+
+/* Время чтения — по числу слов основного текста (`counts.words` в реестре, его считает
+   tools/gen-meta.js). 200 слов в минуту: текст плотный, с цитатами и терминами, быстрее
+   его читают редко. Сноски в счёт не идут — их читают выборочно. */
+const READ_WPM = 200;
+function readTime(e) {
+  const слов = e && e.counts && e.counts.words;
+  if (!слов) return '';
+  const мин = Math.max(1, Math.round(слов / READ_WPM));
+  if (мин < 60) return `${мин} мин`;
+  return `${Math.floor(мин / 60)} ч` + (мин % 60 ? ` ${мин % 60} мин` : '');
+}
+/* Подпись типа для общих мест (поиск по библиотеке, «Продолжить», вырезки), где книги и
+   статьи стоят вперемешку: «Статья · 14 мин», «Книга · 37 глав». Нет счётчиков в реестре
+   (внешняя или только что добавленная запись) — просто «Статья» или «Книга». */
+function kindLabel(e) {
+  if (kindOf(e) === 'article') { const t = readTime(e); return 'Статья' + (t ? ' · ' + t : ''); }
+  const n = e && e.counts && e.counts.chapters;
+  return 'Книга' + (n ? ` · ${n} ${plural(n, 'глава', 'главы', 'глав')}` : '');
+}
+/* Дата публикации статьи ("date": "ГГГГ-ММ-ДД" в реестре). Месяцы пишем сами, а не через
+   toLocaleDateString: тот на разных телефонах даёт то «нояб.», то «ноя», то «г.» в конце. */
+const МЕСЯЦЫ = ['янв.', 'февр.', 'март', 'апр.', 'май', 'июнь', 'июль', 'авг.', 'сент.', 'окт.', 'нояб.', 'дек.'];
+const МЕСЯЦА = ['янв.', 'февр.', 'марта', 'апр.', 'мая', 'июня', 'июля', 'авг.', 'сент.', 'окт.', 'нояб.', 'дек.'];
+function entryDate(e, полная) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec((e && e.date) || '');
+  if (!m || !МЕСЯЦЫ[m[2] - 1]) return '';
+  return полная ? `${Number(m[3])} ${МЕСЯЦА[m[2] - 1]} ${m[1]}` : `${МЕСЯЦЫ[m[2] - 1]} ${m[1]}`;
+}
+// автор и аннотация в манифесте бывают строкой или объектом по языкам
+function plainOf(v) {
+  if (!v) return '';
+  if (typeof v === 'string') return v;
+  return v.ru || Object.values(v).find(Boolean) || '';
 }
 
 // обложка-заглушка: цвет из id, название по центру
@@ -4130,9 +4499,12 @@ function renderTree() {
   for (const n of taxNodes) { const p = catPathNames(n.id); if (p.length === cat.length && p.every((s, i) => s === cat[i])) { selId = n.id; break; } }
   const activeIds = new Set(selId ? catChain(selId).map(n => n.id) : []);
   const collapsed = new Set(Array.isArray(settings.treeCollapsed) ? settings.treeCollapsed : []);
+  // дерево общее для книг и статей, а счёт — по открытой вкладке: иначе «· 3» ведёт к одной записи
+  const вид = shelfKind();
+  const свои = library.filter(e => kindOf(e) === вид);
   const countUnder = node => {
     const np = catPathNames(node.id);
-    return library.filter(e => { const p = bookCatPath(e); return np.every((s, i) => p[i] === s); }).length;
+    return свои.filter(e => { const p = bookCatPath(e); return np.every((s, i) => p[i] === s); }).length;
   };
   const goto = path => { settings.shelfCat = path; saveSettings(); closeTree(); renderLibrary(); };
   // «Все книги»
@@ -4140,7 +4512,7 @@ function renderTree() {
   const allTwist = document.createElement('span'); allTwist.className = 'tree-twist leaf'; allRow.appendChild(allTwist);
   const allLink = document.createElement('button'); allLink.type = 'button';
   allLink.className = 'tree-link' + (cat.length === 0 ? ' active' : '');
-  allLink.textContent = 'Все книги';
+  allLink.textContent = kindMeta(вид).all;
   allLink.addEventListener('click', () => goto([]));
   allRow.appendChild(allLink); aside.appendChild(allRow);
   // рекурсия
@@ -4187,7 +4559,8 @@ function renderFilterSheet() {
   body.innerHTML = '';
   const facets = (settings.shelfFacets && typeof settings.shelfFacets === 'object') ? settings.shelfFacets : (settings.shelfFacets = {});
   const cat = Array.isArray(settings.shelfCat) ? settings.shelfCat : [];
-  const underCat = library.filter(e => entryInCat(e, cat));
+  const вид = shelfKind();
+  const underCat = library.filter(e => kindOf(e) === вид && entryInCat(e, cat));
   let any = false;
   for (const f of FACETS) {
     /* Считаем значения по книгам, прошедшим ВСЕ ОСТАЛЬНЫЕ группы фасетов, а не по
@@ -4234,13 +4607,19 @@ function renderFilterSheet() {
 let shelfQuery = '';   /* намеренно НЕ в settings: сохранённый между запусками фильтр
                           при следующем запуске выглядит как «библиотека опустела» */
 const SHELF_SORTS = [
+  { id: 'new', label: 'сначала новые', only: 'article' },   // по дате публикации — она есть у статей
   { id: 'manual', label: 'как в реестре' },
   { id: 'title', label: 'по названию' },
   { id: 'author', label: 'по автору' },
   { id: 'recent', label: 'сначала читаемые' },
 ];
-const shelfSort = () =>
-  SHELF_SORTS.some(s => s.id === settings.shelfSort) ? settings.shelfSort : 'manual';
+/* Порядок у книг и у статей свой и помнится порознь. Книги по умолчанию стоят как в
+   реестре — это авторская расстановка. Статьи — лентой, свежие сверху: их пишут одну за
+   другой, и читателю, который возвращается, нужна новая, а не первая по реестру. */
+const sortsFor = вид => SHELF_SORTS.filter(s => !s.only || s.only === вид);
+const sortKey = вид => (вид === 'article' ? 'shelfSortArticles' : 'shelfSort');
+const shelfSort = (вид = shelfKind()) =>
+  sortsFor(вид).some(s => s.id === settings[sortKey(вид)]) ? settings[sortKey(вид)] : (вид === 'article' ? 'new' : 'manual');
 
 /* Строка, по которой ищем: название на всех языках, авторы, теги, жанр, путь раздела.
    Нормализуем тем же foldChar, что и поиск по тексту, — значит арабское название
@@ -4257,6 +4636,7 @@ function entryHaystack(e) {
       ...(e.genre || []),
       ...(e.madhhab || []),
       ...bookCatPath(e),
+      plainOf(e.description),   // аннотация статьи: статью ищут по вопросу, а он там
       e.id,
     ].filter(Boolean).join(' '));
     haystackCache.set(e, h);
@@ -4272,11 +4652,12 @@ function entryMatchesQuery(e, q) {
 }
 
 const cmpRu = (a, b) => String(a).localeCompare(String(b), 'ru');
-function sortShelf(list) {
-  const mode = shelfSort();
+function sortShelf(list, mode = shelfSort()) {
   if (mode === 'manual') return list;   // порядок реестра — авторская расстановка
   const out = list.slice();
-  if (mode === 'title') out.sort((a, b) => cmpRu(entryLabel(a), entryLabel(b)));
+  // без даты — в конец, между собой в порядке реестра (сортировка устойчивая)
+  if (mode === 'new') out.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+  else if (mode === 'title') out.sort((a, b) => cmpRu(entryLabel(a), entryLabel(b)));
   else if (mode === 'author') {
     const au = e => (Array.isArray(e.authors) && e.authors[0]) || '￿';  // без автора — в конец
     out.sort((a, b) => cmpRu(au(a), au(b)) || cmpRu(entryLabel(a), entryLabel(b)));
@@ -4295,6 +4676,15 @@ function hashId(s) {
   return h >>> 0;
 }
 function openInfoFor(e) { history.pushState({}, '', '?info=' + encodeURIComponent(e.id)); renderBookInfo(e); }
+/* Открыть запись с полки. Книга — через карточку (обложка, аннотация, «Читать»). Статья —
+   сразу в текст: то, что показала бы карточка, стоит в шапке самой статьи, а лишний экран
+   перед чтением на один присест только мешает. Статья-черновик (`draft`) текста не имеет —
+   ей остаётся карточка. */
+function openEntry(e) {
+  if (kindOf(e) !== 'article' || e.draft) { openInfoFor(e); return; }
+  history.pushState({}, '', '?book=' + encodeURIComponent(e.id));
+  openBook(e);
+}
 // цвет корешка: hue рода + светлота от оттенка подкатегории (без хэша)
 function spineColor(e) {
   const c = catColorOf(e.category);
@@ -4341,7 +4731,7 @@ function spineItem(e) {
   }
   const t = document.createElement('span'); t.className = 'spine-title'; t.textContent = entryLabel(e);
   sp.appendChild(t);
-  sp.addEventListener('click', () => openInfoFor(e));
+  sp.addEventListener('click', () => openEntry(e));
   return sp;
 }
 
@@ -4375,8 +4765,59 @@ function listItem(e) {
 
   const status = document.createElement('span'); status.className = 'br-status'; applyBadges(status, e, false);
   row.append(thumb, main, status);
-  row.addEventListener('click', () => openInfoFor(e));
+  row.addEventListener('click', () => openEntry(e));
   return row;
+}
+
+/* Карточка статьи в ленте. Заголовок и аннотация — настоящим текстом и важнее картинки:
+   статью выбирают по вопросу, на который она отвечает, а не по обложке. Обложка та же,
+   что была бы у книги (миниатюра `thumb`), но маленькая и плоская — без корешка, блика и
+   полки: по ней статью узнают, а не разглядывают. Нет обложки — рисованная заглушка,
+   как у книг, чтобы карточки ленты были одного роста. */
+function articleItem(e) {
+  const card = document.createElement('button');
+  card.type = 'button';
+  card.className = 'art-card';
+  const thumb = document.createElement('span');
+  thumb.className = 'art-thumb';
+  coverInto(thumb, e, '');
+
+  const main = document.createElement('span');
+  main.className = 'art-main';
+  const title = document.createElement('span');
+  title.className = 'art-card-title';
+  setTextSlw(title, entryLabel(e));
+  main.appendChild(title);
+  const аннотация = plainOf(e.description);
+  if (аннотация) {
+    const d = document.createElement('span');
+    d.className = 'art-desc';
+    setTextSlw(d, аннотация);
+    main.appendChild(d);
+  }
+
+  const meta = document.createElement('span');
+  meta.className = 'art-meta';
+  const path = bookCatPath(e);
+  const биты = [path.length ? path[path.length - 1] : '', readTime(e), entryDate(e)].filter(Boolean);
+  if (биты.length) { const t = document.createElement('span'); t.textContent = биты.join(' · '); meta.appendChild(t); }
+  // начатая и дочитанная статья — как «стр. N» на обложке начатой книги
+  const l = getLast(e.id);
+  if (l && l.pct != null && l.pct > 2) {
+    const r = document.createElement('span');
+    r.className = 'art-read';
+    r.textContent = l.pct >= 97 ? 'прочитано' : `читаю · ${l.pct}%`;
+    meta.appendChild(r);
+  }
+  const status = document.createElement('span');
+  status.className = 'art-status';
+  applyBadges(status, e, false);
+  if (status.childNodes.length) meta.appendChild(status);
+  main.appendChild(meta);
+
+  card.append(thumb, main);
+  card.addEventListener('click', () => openEntry(e));
+  return card;
 }
 
 function coverItem(e) {
@@ -4391,7 +4832,7 @@ function coverItem(e) {
     btn.appendChild(note);
   }
   applyBadges(btn, e, false);
-  btn.addEventListener('click', () => openInfoFor(e));
+  btn.addEventListener('click', () => openEntry(e));
   cell.appendChild(btn);
   return cell;
 }
@@ -4410,9 +4851,10 @@ function renderBookList(shown, view, host) {
   if (shelfObserver) { shelfObserver.disconnect(); shelfObserver = null; }
   if (shelfOnScroll) { window.removeEventListener('scroll', shelfOnScroll); shelfOnScroll = null; }
 
-  const make = view === 'spines' ? spineItem : view === 'list' ? listItem : coverItem;
+  // feed — лента статей; три остальных вида — книжные
+  const make = view === 'feed' ? articleItem : view === 'spines' ? spineItem : view === 'list' ? listItem : coverItem;
   const box = document.createElement('div');
-  box.className = view === 'spines' ? 'spineshelf' : view === 'list' ? 'booklist' : 'shelf';
+  box.className = view === 'feed' ? 'artfeed' : view === 'spines' ? 'spineshelf' : view === 'list' ? 'booklist' : 'shelf';
   host.appendChild(box);
 
   const sentinel = document.createElement('div');
@@ -4475,6 +4917,7 @@ function renderLibrary() {
   document.body.dataset.view = 'library';
   if (mtModeOn()) setMtMode(false);   // режим перевода живёт только внутри книги
   book = null;
+  leaveReading();
   document.title = 'Библиотека Таухид';
   $('#chapter-title').textContent = library.length ? 'Библиотека Таухид' : 'Список книг пуст';
   stream.innerHTML = '';
@@ -4494,7 +4937,11 @@ function renderLibrary() {
     line.type = 'button'; line.className = 'continue-line';
     const ico = document.createElement('span'); ico.className = 'cl-ico'; ico.appendChild(svgIco('play'));
     const t = document.createElement('span'); t.className = 'cl-text';
-    t.textContent = entryLabel(recent.entry) + (recent.page != null ? ` · стр. ${recent.page}` : '');
+    // книги и статьи здесь вперемешку — подпись типа говорит, что именно продолжаем
+    t.append(entryLabel(recent.entry));
+    const тип = document.createElement('span'); тип.className = 'kind-tag'; тип.textContent = kindLabel(recent.entry);
+    t.append(' ', тип);
+    if (recent.page != null) t.append(` · стр. ${recent.page}`);
     const arr = document.createElement('span'); arr.className = 'cl-arrow'; arr.textContent = '›';
     line.append(ico, t, arr);
     line.addEventListener('click', open(recent.entry));
@@ -4504,6 +4951,35 @@ function renderLibrary() {
   // ── классификатор: дерево категорий + фасеты (по полям записи index.json) ──
   const cat = Array.isArray(settings.shelfCat) ? settings.shelfCat : (settings.shelfCat = []);
   const facets = (settings.shelfFacets && typeof settings.shelfFacets === 'object') ? settings.shelfFacets : (settings.shelfFacets = {});
+  /* Вкладки «Книги / Статьи» — тип записи. Рубрикатор, фильтры и поиск общие, вкладка
+     только отбирает, что показывать и в каком виде. Библиотека из записей одного типа
+     (например, чья-то копия без статей) вкладок не получает: выбирать не из чего. */
+  const вид = shelfKind();
+  const типы = KINDS.filter(k => library.some(e => kindOf(e) === k.id));
+  if (типы.length > 1) {
+    const tabs = document.createElement('div');
+    tabs.className = 'kind-tabs';
+    tabs.setAttribute('role', 'tablist');
+    for (const k of типы) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'kind-tab' + (k.id === вид ? ' active' : '');
+      b.setAttribute('role', 'tab');
+      b.setAttribute('aria-selected', String(k.id === вид));
+      b.append(svgIco(k.ico), k.tab);
+      const n = document.createElement('span');
+      n.className = 'kind-n';
+      n.textContent = library.filter(e => kindOf(e) === k.id && entryInCat(e, cat)).length;
+      b.appendChild(n);
+      b.addEventListener('click', () => {
+        if (k.id === вид) return;
+        settings.shelfKind = k.id; saveSettings(); renderLibrary();
+      });
+      tabs.appendChild(b);
+    }
+    stream.appendChild(tabs);
+  }
+
   const panel = document.createElement('div');
   panel.className = 'classifier';
 
@@ -4518,22 +4994,23 @@ function renderLibrary() {
     b.addEventListener('click', () => { settings.shelfCat = cat.slice(0, depth); saveSettings(); renderLibrary(); });
     crumbs.appendChild(b);
   };
-  addCrumb('Все книги', 0);
+  addCrumb(kindMeta(вид).all, 0);
   cat.forEach((seg, i) => {
     const sep = document.createElement('span'); sep.className = 'crumb-sep'; sep.textContent = '›'; crumbs.appendChild(sep);
     addCrumb(seg, i + 1);
   });
   panel.appendChild(crumbs);
 
-  // книги в текущей ветке дерева
-  const underCat = library.filter(e => entryInCat(e, cat));
+  // записи открытой вкладки в текущей ветке дерева
+  const underCat = library.filter(e => kindOf(e) === вид && entryInCat(e, cat));
 
   // навигация по подкатегориям — в боковом дереве (#cat-tree); фасеты — в нижней
   // панели фильтров (#filter-sheet). На основном экране остаётся только крошка.
   stream.appendChild(panel);
 
-  // переключатель видов (запоминается в settings.shelfView)
-  const view = ['covers', 'spines', 'list'].includes(settings.shelfView) ? settings.shelfView : (settings.shelfView = 'covers');
+  // переключатель видов (запоминается в settings.shelfView) — только у книг; статьи всегда лентой
+  const bookView = ['covers', 'spines', 'list'].includes(settings.shelfView) ? settings.shelfView : (settings.shelfView = 'covers');
+  const view = вид === 'article' ? 'feed' : bookView;
 
   /* Панель полки: поиск, порядок, виды, счётчик. Строится ОДИН раз, а при вводе
      перерисовывается только список — иначе поле поиска пересоздавалось бы на каждой
@@ -4604,11 +5081,11 @@ function renderLibrary() {
 
   const sort = document.createElement('select');
   sort.className = 'shelf-sort';
-  sort.setAttribute('aria-label', 'Порядок книг');
-  for (const s of SHELF_SORTS) {
+  sort.setAttribute('aria-label', вид === 'article' ? 'Порядок статей' : 'Порядок книг');
+  for (const s of sortsFor(вид)) {
     const o = document.createElement('option');
     o.value = s.id; o.textContent = s.label;
-    if (s.id === shelfSort()) o.selected = true;
+    if (s.id === shelfSort(вид)) o.selected = true;
     sort.appendChild(o);
   }
 
@@ -4634,6 +5111,7 @@ function renderLibrary() {
   const count = document.createElement('span');
   count.className = 'shelf-count';
 
+  if (вид === 'article') sw.hidden = true;   // у ленты статей вид один
   bar.append(поиск, sort, sw, filt, count);
   stream.appendChild(bar);
   updateFilterBadge();
@@ -4644,16 +5122,30 @@ function renderLibrary() {
 
   const paint = () => {
     const shown = sortShelf(underCat.filter(e =>
-      entryMatchesFacets(e, facets) && entryMatchesQuery(e, shelfQuery)));
+      entryMatchesFacets(e, facets) && entryMatchesQuery(e, shelfQuery)), shelfSort(вид));
     // «показано из скольких» — иначе непонятно, фильтр отсёк или книг столько и есть
     count.textContent = shown.length === underCat.length
       ? `${underCat.length}`
       : `${shown.length} / ${underCat.length}`;
     body.innerHTML = '';
+    /* Запрос ищет в открытой вкладке, а нужное может лежать в соседней: искали статью,
+       стоя в «Книгах». Молча показать «ничего не нашлось» — значит соврать: говорим,
+       сколько нашлось там, и ведём туда с тем же запросом. */
+    if (shelfQuery) for (const k of типы) {
+      if (k.id === вид) continue;
+      const там = library.filter(e => kindOf(e) === k.id && entryInCat(e, cat) && entryMatchesQuery(e, shelfQuery)).length;
+      if (!там) continue;
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'shelf-other';
+      b.textContent = `Во вкладке «${k.tab}» по этому запросу — ${там} ›`;
+      b.addEventListener('click', () => { settings.shelfKind = k.id; saveSettings(); renderLibrary(); });
+      body.appendChild(b);
+    }
     if (!shown.length) {
       const m = document.createElement('div');
       m.className = 'shelf-empty';
-      m.textContent = shelfQuery ? `Ничего не нашлось по запросу «${shelfQuery}».` : 'По выбранным фильтрам книг нет.';
+      m.textContent = shelfQuery ? `Ничего не нашлось по запросу «${shelfQuery}».` : `По выбранным фильтрам ${kindMeta(вид).gen} нет.`;
       body.appendChild(m);
     } else {
       renderBookList(shown, view, body);
@@ -4661,7 +5153,7 @@ function renderLibrary() {
   };
 
   sort.addEventListener('change', () => {
-    settings.shelfSort = sort.value;
+    settings[sortKey(вид)] = sort.value;
     saveSettings();
     paint();
   });
@@ -4679,6 +5171,7 @@ async function renderBookInfo(entry) {
   document.body.dataset.view = 'library';
   if (mtModeOn()) setMtMode(false);
   book = null;
+  leaveReading();
   document.title = entryLabel(entry);
   $('#chapter-title').textContent = entryLabel(entry);
   stream.innerHTML = '';
@@ -4687,7 +5180,7 @@ async function renderBookInfo(entry) {
   const back = document.createElement('button');
   back.type = 'button';
   back.className = 'bookinfo-back';
-  back.textContent = '← Все книги';
+  back.textContent = '← ' + kindMeta(kindOf(entry)).all;
   back.addEventListener('click', () => { history.pushState({}, '', location.pathname); renderLibrary(); });
   stream.appendChild(back);
 
@@ -4732,7 +5225,7 @@ async function renderBookInfo(entry) {
     sub.textContent = subText;
     meta.appendChild(sub);
   }
-  const author = manifest && manifest.author && (manifest.author.ru || Object.values(manifest.author)[0]);
+  const author = manifest && plainOf(manifest.author);
   if (author) {
     const a = document.createElement('div');
     a.className = 'bookinfo-line';
@@ -4753,7 +5246,7 @@ async function renderBookInfo(entry) {
   if (manifest && manifest.description) {
     const d = document.createElement('p');
     d.className = 'bookinfo-desc';
-    setTextSlw(d, manifest.description);
+    setTextSlw(d, plainOf(manifest.description));
     meta.appendChild(d);
   }
 
@@ -4797,7 +5290,25 @@ async function renderBookInfo(entry) {
   window.scrollTo(0, 0);
 }
 
+/* Уход из чтения (на полку, на карточку книги, в другую запись): поток статьи больше не
+   отрисован, и её режим «одной страницей» не должен достаться следующей книге. */
+function leaveReading() {
+  singlePage = false;
+  articleShown = null;
+  streamChapters = [];
+  fnShown = null;
+  /* Открытой записи больше нет — значит, нет и её id. Раньше `bookId` переживал уход на
+     полку, и всё, что спрашивает «мы в книге?» по нему, ошибалось: поиск с полки открывался
+     в границах последней книги (без названий и подписей типа в выдаче), а вырезка этой
+     книги из общего списка пыталась прокрутить текст, которого на экране нет. */
+  bookId = null;
+  bookEntry = null;
+  document.body.classList.remove('single-page');
+}
+
 async function openBook(entry, opts = {}) {
+  leaveReading();
+  bookEntry = entry;
   bookId = entry.id;
   base = entry.base.endsWith('/') ? entry.base : entry.base + '/';
   privateBook = entry.private === true;   // непубличная книга → путь через бакет
@@ -4822,6 +5333,11 @@ async function openBook(entry, opts = {}) {
   }
   if (!Array.isArray(book.rtl)) book.rtl = [];
   if (!book.title) book.title = { [book.languages[0]]: entry.id };
+  /* Статья читается одной страницей. Комикс (`view: comic`) листается кадрами по главам —
+     этот режим сильнее: статья-комикс остаётся комиксом. */
+  singlePage = kindOf(entry) === 'article' && book.view !== 'comic';
+  // «домой» из записи ведёт на вкладку её типа: прочитал статью — вернулся к статьям
+  if (settings.shelfKind !== kindOf(entry)) { settings.shelfKind = kindOf(entry); saveSettings(); }
   if (!['both', ...book.languages, ...(book.languages.length > 1 ? book.languages.map(l => 'quiz:' + l) : [])].includes(settings.visibility)) settings.visibility = 'both';
   ensureFontDefaults();
   applyFonts();
@@ -4833,9 +5349,14 @@ async function openBook(entry, opts = {}) {
   buildMarkPanel();
   // переход из поиска по библиотеке: открыть нужную главу и подсветить попадание
   if (opts.hit) { pendingHit = opts.hit; await loadChapter(opts.hit.ci, opts.hit.id); return; }
-  // deep-link ?s=<sector> — найти главу с этим сектором; иначе вернуться к позиции
+  /* deep-link ?c=<глава>&s=<сектор>. Глава в ссылке — с новых ссылок (shareSector): сектор
+     с таким id есть в каждой главе. Старая ссылка без главы — первая глава, где он нашёлся. */
   if (opts.sector) {
-    const ci = await chapterOfSector(opts.sector);
+    let ci = -1;
+    if (Number.isInteger(opts.chapter) && book.chapters[opts.chapter] && chHasFile(book.chapters[opts.chapter])) {
+      try { if ((await loadChapterData(opts.chapter)).pairs.some(p => p.id === opts.sector)) ci = opts.chapter; } catch { /* ниже */ }
+    }
+    if (ci < 0) ci = await chapterOfSector(opts.sector);
     if (ci >= 0) { await loadChapter(ci, opts.sector); return; }
     toast(`Сектор ${opts.sector} не найден`);
   }
@@ -4845,6 +5366,9 @@ async function openBook(entry, opts = {}) {
   }
   if (opts.fromStart) { await loadChapter(0); if (book.view === 'comic') openComic(chapterIndex, 0); return; }
   const last = getLast(bookId);
+  // дочитанную статью открываем сначала: возвращаться в её конец незачем, а кнопки
+  // «Сначала» у статьи нет — она без карточки
+  if (singlePage && last && last.pct >= 97) { await loadChapter(0); return; }
   const ci = last && Number.isInteger(last.chapter) ? last.chapter : 0;
   await loadChapter(Math.min(Math.max(ci, 0), book.chapters.length - 1), last ? last.sector : null);
   if (book.view === 'comic') openComic(chapterIndex, last && last.chapter === chapterIndex ? last.frame || 0 : 0);
@@ -4854,12 +5378,13 @@ async function chapterOfSector(secId) {
   for (let ci = 0; ci < book.chapters.length; ci++) {
     let d;
     try { d = await loadChapterData(ci); } catch { continue; }
-    if (d.pairs.some(p => p.id === secId)) return ci;
+    if (d.pairs.some(p => p.id === secId)) return ci;   // ⚠ первая подходящая; точнее — глава из ссылки (?c=)
   }
   return -1;
 }
 
-/* маршрут по ?book=<id>&s=<sector>: книга из списка — читаем, иначе — библиотека */
+/* маршрут по ?book=<id>&c=<глава>&s=<sector>: запись из списка — читаем, иначе — библиотека.
+   Тип записи в адресе не участвует: ?book=<id> открывает и книгу, и статью. */
 function route() {
   const params = new URLSearchParams(location.search);
   const wanted = params.get('book');
@@ -4867,15 +5392,26 @@ function route() {
   const sector = params.get('s');
   // id сектора — только безопасные символы (sNNN/fnNNN/s050a и т.п.)
   const safeSector = sector && /^[\w-]+$/.test(sector) ? sector : null;
+  const c = params.get('c');
+  const chapter = c && /^\d+$/.test(c) ? Number(c) - 1 : null;   // в ссылке главы считаются с единицы
   if (entry && entry.draft) { renderBookInfo(entry); return; }   // текста ещё нет
-  if (entry) { openBook(entry, { sector: safeSector }); return; }
+  if (entry) {
+    openBook(entry, safeSector ? { sector: safeSector, chapter } : (chapter != null ? { chapter } : {}));
+    return;
+  }
   const info = params.get('info');
   const infoEntry = info ? library.find(b => b.id === info) : null;
+  // карточки у статьи нет: старая ссылка ?info=<id> на запись, ставшую статьёй, ведёт в текст
+  if (infoEntry && kindOf(infoEntry) === 'article' && !infoEntry.draft) {
+    history.replaceState({}, '', '?book=' + encodeURIComponent(infoEntry.id));
+    openBook(infoEntry);
+    return;
+  }
   if (infoEntry) renderBookInfo(infoEntry);
   else renderLibrary();
 }
 window.addEventListener('popstate', () => {
-  if (suppressPop) { suppressPop = false; return; }
+  if (suppressPop) { suppressPop = false; if (backResolve) backResolve(); return; }
   if (overlayMark) { overlayMark = false; if (closeTopPopup()) return; }
   route();
 });
@@ -5003,6 +5539,12 @@ $('#acc-signout').addEventListener('click', async () => {
 });
 
 /* ===== старт ===== */
+/* Место в тексте читалка помнит и восстанавливает сама (settings.last), а на полке всегда
+   встаёт наверх. Браузерное восстановление прокрутки при шаге по истории только мешает:
+   шаг назад случается при закрытии каждой панели (openOverlay кладёт маркер), и браузер
+   возвращал страницу туда, где она была до открытия панели, — поверх нашей прокрутки. */
+if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+
 async function init() {
   migrateMarks();   // старые закладки/выделения → единые пометки (одноразово)
   applyTheme();
