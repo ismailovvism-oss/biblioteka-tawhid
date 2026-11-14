@@ -108,6 +108,33 @@ body[data-view="library"] #progress { display: none; }
   font-size: 0.92rem;
 }
 
+/* ===== значки интерфейса =====
+   Линейные SVG из спрайта в index.html (<symbol id="i-имя">), красятся цветом текста.
+   Раньше значками были эмодзи: каждый телефон рисовал их по-своему — цветными, разного
+   размера и толщины (14.11.2026). Контур задаётся здесь, в <symbol> — только геометрия. */
+.ico {
+  width: 1.15em;
+  height: 1.15em;
+  flex: none;
+  vertical-align: -0.2em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+/* в шапке значок занимает ту же клетку 1.5rem, что занимал эмодзи, — высота панели прежняя */
+#topbar .ico { display: block; width: 1.3rem; height: 1.3rem; margin: 0.1rem 0; }
+/* значок шире прежнего эмодзи на пару пикселей — возвращаем их полями, иначе на телефоне
+   название главы в шапке сжимается до «Во…» */
+#topbar button { padding-inline: 0.4rem; }
+#topbar #btn-warn .ico { display: inline-block; width: 1.05rem; height: 1.05rem; margin: 0; }
+.vs-btn .ico { display: block; }
+.review-badge .ico { width: 0.82rem; height: 0.82rem; stroke-width: 2.6; }
+.bm-actions .ico, .sharh-mark .ico { display: block; }
+.sharh-mark { color: var(--accent); }
+
 #btn-vis { font-size: 0.8rem; letter-spacing: 0.03em; }
 #btn-warn { color: var(--error); font-size: 0.85rem; }
 #page-indicator { color: var(--muted); font-size: 0.92rem; }
@@ -173,11 +200,16 @@ body[data-view="library"] #progress { display: none; }
 body.hl-off .pair.active { border-inline-start-color: transparent; background: transparent; }
 .pair.bookmarked { padding-inline-end: 1.7rem; } /* резерв под метку, чтобы не налезала на текст */
 .pair.bookmarked::after {
-  content: "🔖";
+  /* флажок закладки — маской, чтобы красился акцентом темы (раньше был эмодзи) */
+  content: "";
   position: absolute;
-  top: 0.45rem;
-  inset-inline-end: 0.3rem;
-  font-size: 0.8rem;
+  top: 0.5rem;
+  inset-inline-end: 0.42rem;
+  width: 0.68rem;
+  height: 0.92rem;
+  background: var(--accent);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 19'%3E%3Cpath d='M1 0h12a1 1 0 0 1 1 1v18l-7-4.5L0 19V1a1 1 0 0 1 1-1z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 19'%3E%3Cpath d='M1 0h12a1 1 0 0 1 1 1v18l-7-4.5L0 19V1a1 1 0 0 1 1-1z'/%3E%3C/svg%3E") center / contain no-repeat;
   opacity: 0.85;
 }
 
@@ -950,7 +982,7 @@ body:not([data-view="library"]) #cat-tree { display: none; }
   padding: 0.4rem 0.5rem; border: 1px solid var(--border); border-radius: 8px;
   background: var(--panel); color: inherit; cursor: pointer; text-align: start; font: inherit;
 }
-.book-row .br-thumb { flex: 0 0 auto; width: 34px; height: 48px; border-radius: 2px; overflow: hidden; display: block; background: #fff; }
+.book-row .br-thumb { flex: 0 0 auto; width: 34px; height: 48px; border-radius: 2px; overflow: hidden; display: block; background: var(--border); }
 .book-row .br-thumb img, .book-row .br-thumb .cover-gen { width: 100%; height: 100%; object-fit: cover; }
 .book-row .br-thumb .cover-gen { font-size: 0.5rem; padding: 0.2rem; gap: 0.15rem; }
 .book-row .br-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1236,7 +1268,7 @@ mark.hl.has-note { box-shadow: inset 0 -0.14em 0 var(--accent); }
   border-radius: 2px 5px 5px 2px;
   overflow: hidden;
   cursor: pointer;
-  background: #fff;
+  background: var(--border);   /* пока обложка грузится — спокойный тон бумаги, а не белая дыра */
   box-shadow: -3px 3px 0 rgba(0, 0, 0, 0.12), 3px 5px 12px rgba(0, 0, 0, 0.35);
   margin-bottom: 2px;
 }

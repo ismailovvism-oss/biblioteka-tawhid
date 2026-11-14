@@ -9,6 +9,7 @@
         "ru": "Тауфик аль-Маннан"
       },
       "cover": "books/tawfiq/cover.jpg",
+      "thumb": "books/tawfiq/cover-thumb.jpg",
       "category": "aqida-iman-kufr",
       "review": "approved",
       "progress": "wip",
@@ -48,6 +49,7 @@
         "украшения"
       ],
       "cover": "books/libas/cover.jpg",
+      "thumb": "books/libas/cover-thumb.jpg",
       "era": "Современность"
     },
     {
@@ -78,6 +80,7 @@
         "джахмиты"
       ],
       "cover": "books/tavil/cover.jpg",
+      "thumb": "books/tavil/cover-thumb.jpg",
       "era": "Современность"
     },
     {
@@ -106,7 +109,8 @@
         "усуль/иллят"
       ],
       "era": "Современность",
-      "cover": "books/posuda/cover.jpg"
+      "cover": "books/posuda/cover.jpg",
+      "thumb": "books/posuda/cover-thumb.jpg"
     },
     {
       "id": "fatiha",
@@ -134,7 +138,8 @@
         "усуль/хукм/рукн"
       ],
       "era": "Современность",
-      "cover": "books/fatiha/cover.jpg"
+      "cover": "books/fatiha/cover.jpg",
+      "thumb": "books/fatiha/cover-thumb.jpg"
     },
     {
       "id": "muha",
@@ -163,7 +168,8 @@
         "асар"
       ],
       "era": "Современность",
-      "cover": "books/muha/cover.jpg"
+      "cover": "books/muha/cover.jpg",
+      "thumb": "books/muha/cover-thumb.jpg"
     },
     {
       "id": "_sample-en",
@@ -191,6 +197,7 @@
         "ru": "Робинзон Крузо"
       },
       "cover": "books/crusoe/cover.jpg",
+      "thumb": "books/crusoe/cover-thumb.jpg",
       "category": "misc",
       "progress": "ready",
       "genre": [
@@ -257,7 +264,8 @@
         "арабский/коран"
       ],
       "era": "Современность",
-      "cover": "books/arab-paltsy/cover.jpg"
+      "cover": "books/arab-paltsy/cover.jpg",
+      "thumb": "books/arab-paltsy/cover-thumb.jpg"
     },
     {
       "id": "tafsir-fatiha",
@@ -281,7 +289,8 @@
         "коран/тафсир/фатиха"
       ],
       "era": "Современность",
-      "cover": "books/tafsir-fatiha/cover.jpg"
+      "cover": "books/tafsir-fatiha/cover.jpg",
+      "thumb": "books/tafsir-fatiha/cover-thumb.jpg"
     }
   ]
 }

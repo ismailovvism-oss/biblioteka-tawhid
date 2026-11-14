@@ -403,7 +403,7 @@ function renderChapter() {
       const mark = document.createElement('button');
       mark.type = 'button';
       mark.className = 'sharh-mark';
-      mark.textContent = '💡';
+      mark.appendChild(svgIco('bulb'));
       mark.title = 'Шарх: ' + pair.sharh.join('; ');
       mark.setAttribute('aria-label', mark.title);
       el.classList.add('has-sharh');
@@ -1600,17 +1600,17 @@ function markRow(m, bid, { compact = false } = {}) {
   const edit = document.createElement('button');
   edit.type = 'button';
   edit.title = 'Заметка, цвет, теги, сборники';
-  edit.textContent = '✎';
+  edit.appendChild(svgIco('pencil'));
   edit.addEventListener('click', () => openMarkEditor(m.id, { bookOf: bid }));
   const share = document.createElement('button');
   share.type = 'button';
   share.title = 'Скопировать ссылку';
-  share.textContent = '↗';
+  share.appendChild(svgIco('linkout'));
   share.addEventListener('click', () => shareSector(m.sector));
   const del = document.createElement('button');
   del.type = 'button';
   del.title = 'Удалить';
-  del.textContent = '🗑';
+  del.appendChild(svgIco('trash'));
   del.addEventListener('click', () => {
     if (bid === bookId) removeMark(m.id);
     else {
@@ -2683,7 +2683,7 @@ function renderMtPromptList() {
       actions.className = 'mt-prompt-actions';
       const edit = document.createElement('button');
       edit.type = 'button';
-      edit.textContent = '✎ Править';
+      icoLabel(edit, 'pencil', 'Править');
       edit.addEventListener('click', () => {
         $('#mt-prompt-name').value = p.label;
         $('#mt-prompt-text').value = p.text;
@@ -2692,7 +2692,7 @@ function renderMtPromptList() {
       });
       const del = document.createElement('button');
       del.type = 'button';
-      del.textContent = '🗑 Удалить';
+      icoLabel(del, 'trash', 'Удалить');
       del.addEventListener('click', () => {
         settings.mtPrompts = (settings.mtPrompts || []).filter(x => x.id !== p.id);
         // выбранным был именно он — вернуться к обычному переводу, а не к пустоте
@@ -2934,16 +2934,16 @@ function renderOneCollection(box, c) {
   const tools = document.createElement('div');
   tools.className = 'coll-tools';
   const rename = document.createElement('button');
-  rename.type = 'button'; rename.className = 'chip'; rename.textContent = '✎ переименовать';
+  rename.type = 'button'; rename.className = 'chip'; icoLabel(rename, 'pencil', 'переименовать');
   rename.addEventListener('click', () => {
     const n = prompt('Название сборника:', c.name);
     if (n && n.trim()) { c.name = n.trim(); saveSettings(); renderClips(); }
   });
   const copy = document.createElement('button');
-  copy.type = 'button'; copy.className = 'chip'; copy.textContent = '⧉ скопировать как текст';
+  copy.type = 'button'; copy.className = 'chip'; icoLabel(copy, 'copy', 'скопировать как текст');
   copy.addEventListener('click', () => copyCollection(c));
   const del = document.createElement('button');
-  del.type = 'button'; del.className = 'chip'; del.textContent = '🗑 удалить сборник';
+  del.type = 'button'; del.className = 'chip'; icoLabel(del, 'trash', 'удалить сборник');
   del.addEventListener('click', () => {
     if (!confirm(`Удалить сборник «${c.name}»? Сами вырезки останутся.`)) return;
     settings.collections = (settings.collections || []).filter(x => x.id !== c.id);
@@ -2961,7 +2961,7 @@ function renderOneCollection(box, c) {
   if (!items.length) {
     const p = document.createElement('p');
     p.className = 'clips-empty';
-    p.textContent = 'Пусто. Откройте вырезку (✎) и добавьте её в этот сборник.';
+    p.append('Пусто. Откройте вырезку (', svgIco('pencil'), ') и добавьте её в этот сборник.');
     box.appendChild(p);
     return;
   }
@@ -3062,6 +3062,44 @@ async function gotoPage(n) {
   toast(`Страница ${n} не найдена`);
 }
 
+/* Значки интерфейса — линейные SVG из спрайта в index.html (<symbol id="i-имя">), а не эмодзи:
+   эмодзи каждый телефон рисует по-своему — цветными, разного размера и толщины (14.11.2026).
+   Размер и контур задаёт класс .ico (style.css); цвет — цвет текста вокруг. */
+function svgIco(name) {
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('class', 'ico');
+  svg.setAttribute('aria-hidden', 'true');
+  const use = document.createElementNS(NS, 'use');
+  use.setAttribute('href', '#i-' + name);
+  svg.appendChild(use);
+  return svg;
+}
+// «значок + подпись» в кнопке или плашке; прежнее содержимое узла заменяется
+function icoLabel(el, name, text) {
+  el.textContent = '';
+  el.append(svgIco(name), ' ' + text);
+  return el;
+}
+
+/* Простой текст вне потока секторов (аннотация на карточке книги): саляват ﷺ оборачиваем в
+   тот же span.slw, что ставит inlineMd в parser.js. Без него знак берётся из случайного
+   системного шрифта и налезает на соседние строки — в тексте глав это починено 14.11.2026,
+   а аннотация шла мимо inlineMd. В арабском тексте знак не трогаем (mostlyArabic). */
+function setTextSlw(el, text) {
+  const s = String(text == null ? '' : text);
+  el.textContent = '';
+  if (!s.includes('ﷺ') || mostlyArabic(s)) { el.textContent = s; return; }
+  s.split('ﷺ').forEach((part, i) => {
+    if (i) {
+      const sp = document.createElement('span');
+      sp.className = 'slw'; sp.textContent = 'ﷺ';
+      el.appendChild(sp);
+    }
+    if (part) el.append(part);
+  });
+}
+
 function toast(msg) {
   const t = document.createElement('div');
   t.className = 'toast';
@@ -3098,7 +3136,7 @@ function renderDebug() {
   const btn = $('#btn-warn');
   // значок валидатора — инструмент автора, не для читателя: только в debug и при варнингах
   btn.hidden = !settings.debug || warnings.length === 0;
-  btn.textContent = `⚠ ${warnings.length}`;
+  icoLabel(btn, 'alert', String(warnings.length));
   const panel = $('#debug-panel');
   panel.innerHTML = '';
   // панель валидатора — только в debug И только когда есть что показать
@@ -3992,17 +4030,18 @@ function genCover(e) {
 // Две независимые оси у книги: ОДОБРЕНИЕ (review) и ГОТОВНОСТЬ (progress).
 // Книга может быть одновременно «одобрено» и «в работе». Каждая — свой бейдж и фасет.
 const APPROVAL = {
-  approved: { label: 'Одобрено администрацией', short: 'Одобрено', icon: '✓', cls: 'review-approved' },
-  caution:  { label: 'Осторожно, требует проверки', short: 'Требует проверки', icon: '⚠', cls: 'review-caution' },
+  approved: { label: 'Одобрено администрацией', short: 'Одобрено', icon: 'check', cls: 'review-approved' },
+  caution:  { label: 'Осторожно, требует проверки', short: 'Требует проверки', icon: 'alert', cls: 'review-caution' },
 };
 const PROGRESS = {
-  wip:   { label: 'В работе (недоработано)', short: 'В работе', icon: '🚧', cls: 'review-wip' },
-  ready: { label: 'Доработано', short: 'Готово', icon: '✔', cls: 'review-ready' },
+  wip:   { label: 'В работе (недоработано)', short: 'В работе', icon: 'wip', cls: 'review-wip' },
+  ready: { label: 'Доработано', short: 'Готово', icon: 'check', cls: 'review-ready' },
 };
 function badgeEl(meta, full) {
   const b = document.createElement('span');
   b.className = 'review-badge ' + meta.cls;
-  b.textContent = full ? (meta.icon + ' ' + meta.short) : meta.icon;
+  b.appendChild(svgIco(meta.icon));   // icon — имя значка в спрайте (index.html)
+  if (full) b.append(meta.short);
   b.title = meta.label;
   return b;
 }
@@ -4015,8 +4054,8 @@ function applyBadges(host, e, full) {
   else if (full && e && e.progress === 'ready') host.appendChild(badgeEl(PROGRESS.ready, full));
 }
 const FACETS = [
-  { key: 'review', label: 'Одобрение', fmt: v => (APPROVAL[v] ? APPROVAL[v].icon + ' ' + APPROVAL[v].short : v) },
-  { key: 'progress', label: 'Готовность', fmt: v => (PROGRESS[v] ? PROGRESS[v].icon + ' ' + PROGRESS[v].short : v) },
+  { key: 'review', label: 'Одобрение', fmt: v => (APPROVAL[v] ? APPROVAL[v].short : v) },
+  { key: 'progress', label: 'Готовность', fmt: v => (PROGRESS[v] ? PROGRESS[v].short : v) },
   { key: 'langs', label: 'Язык', fmt: v => langName(v) },
   { key: 'authors', label: 'Автор', fmt: v => v },
   { key: 'madhhab', label: 'Мазхаб', fmt: v => v },
@@ -4272,11 +4311,19 @@ function spineDims(e) {
   const height = 88 + ((h >>> 8) % 13);
   return { width, height };
 }
+/* На полке и в списке — миниатюра (`thumb` в реестре, 320 px, tools/gen-thumbs.js); полная
+   обложка — только на карточке книги. Полные обложки весят по 100–390 КБ при слоте шириной
+   около 100 px: девять книг — два мегабайта на первый экран (замер 14.11.2026). Миниатюры нет
+   или она не загрузилась — берём полную обложку; не вышло и с ней — рисованную. */
 function coverInto(host, e, alt) {
   if (e.cover) {
     const img = document.createElement('img');
-    img.src = e.cover; img.alt = alt || ''; img.loading = 'lazy';
-    img.onerror = () => { img.remove(); host.prepend(genCover(e)); };
+    img.alt = alt || ''; img.loading = 'lazy'; img.decoding = 'async';
+    img.onerror = () => {
+      if (e.thumb && img.dataset.full !== '1') { img.dataset.full = '1'; img.src = e.cover; return; }
+      img.remove(); host.prepend(genCover(e));
+    };
+    img.src = e.thumb || e.cover;
     host.appendChild(img);
   } else host.appendChild(genCover(e));
 }
@@ -4445,7 +4492,7 @@ function renderLibrary() {
   if (recent) {
     const line = document.createElement('button');
     line.type = 'button'; line.className = 'continue-line';
-    const ico = document.createElement('span'); ico.className = 'cl-ico'; ico.textContent = '▶';
+    const ico = document.createElement('span'); ico.className = 'cl-ico'; ico.appendChild(svgIco('play'));
     const t = document.createElement('span'); t.className = 'cl-text';
     t.textContent = entryLabel(recent.entry) + (recent.page != null ? ` · стр. ${recent.page}` : '');
     const arr = document.createElement('span'); arr.className = 'cl-arrow'; arr.textContent = '›';
@@ -4546,7 +4593,7 @@ function renderLibrary() {
     const кнопка = document.createElement('button');
     кнопка.type = 'button';
     кнопка.className = 'shelf-qbtn';
-    кнопка.textContent = '🔍 Поиск';
+    icoLabel(кнопка, 'search', 'Поиск');
     кнопка.title = 'Поиск по полке: название, автор, тема';
     кнопка.addEventListener('click', () => открытьПоиск());
     поиск.appendChild(кнопка);
@@ -4566,10 +4613,10 @@ function renderLibrary() {
   }
 
   const sw = document.createElement('div'); sw.className = 'view-switch';
-  for (const [v, ico, lab] of [['covers', '▦', 'Обложки'], ['spines', '📚', 'Корешки'], ['list', '☰', 'Список']]) {
+  for (const [v, ico, lab] of [['covers', 'grid', 'Обложки'], ['spines', 'library', 'Корешки'], ['list', 'list', 'Список']]) {
     const b = document.createElement('button'); b.type = 'button';
     b.className = 'vs-btn' + (v === view ? ' active' : '');
-    b.title = lab; b.textContent = ico;
+    b.title = lab; b.setAttribute('aria-label', lab); b.appendChild(svgIco(ico));
     b.addEventListener('click', () => { settings.shelfView = v; saveSettings(); renderLibrary(); });
     sw.appendChild(b);
   }
@@ -4581,7 +4628,7 @@ function renderLibrary() {
   filt.id = 'btn-filter';
   filt.className = 'shelf-filter';
   filt.title = 'Отбор по признакам: одобрение, готовность, язык, автор, тема';
-  filt.innerHTML = '⛃ Фильтры<span id="filter-count" class="filter-badge" hidden></span>';
+  filt.innerHTML = '<svg class="ico" aria-hidden="true"><use href="#i-filter"/></svg> Фильтры<span id="filter-count" class="filter-badge" hidden></span>';
   filt.addEventListener('click', () => { renderFilterSheet(); openOverlay($('#filter-sheet')); });
 
   const count = document.createElement('span');
@@ -4706,7 +4753,7 @@ async function renderBookInfo(entry) {
   if (manifest && manifest.description) {
     const d = document.createElement('p');
     d.className = 'bookinfo-desc';
-    d.textContent = manifest.description;
+    setTextSlw(d, manifest.description);
     meta.appendChild(d);
   }
 
@@ -4722,7 +4769,7 @@ async function renderBookInfo(entry) {
   if (entry.draft) {
     const плашка = document.createElement('div');
     плашка.className = 'bookinfo-draft';
-    плашка.textContent = '🚧 В разработке — текст ещё не выложен';
+    icoLabel(плашка, 'wip', 'В разработке — текст ещё не выложен');
     actions.appendChild(плашка);
     meta.appendChild(actions);
     box.appendChild(meta);

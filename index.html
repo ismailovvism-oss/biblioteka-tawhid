@@ -16,19 +16,56 @@
 </head>
 <body data-theme="light" data-layout="v" data-view="library">
 
+<!-- Значки интерфейса: линейные, одного стиля, красятся цветом текста (style.css, .ico).
+     Вместо эмодзи, которые каждый телефон рисует по-своему (14.11.2026). Сборки нет, поэтому
+     спрайт лежит прямо здесь; в разметке — <svg class="ico"><use href="#i-имя"/></svg>,
+     в коде — svgIco('имя') из app.js. Геометрия в сетке 24×24 в духе набора Lucide (ISC). -->
+<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></symbol>
+  <symbol id="i-library" viewBox="0 0 24 24"><path d="M4 4v16M8 8v12M12 6v14M16 6l4 14"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></symbol>
+  <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M19 21l-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="i-scissors" viewBox="0 0 24 24"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M8.12 8.12L12 12M20 4L8.12 15.88M14.8 14.8L20 20"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a13.5 13.5 0 0 1 0 18a13.5 13.5 0 0 1 0-18"/></symbol>
+  <symbol id="i-gloss" viewBox="0 0 24 24"><path d="M7.5 13L12 3l4.5 10M9.1 9.5h5.8M5 17h14M8 21h8"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 4.3L2.6 17.5a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.3a2 2 0 0 0-3.4 0zM12 9.5v4M12 17h.01"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></symbol>
+  <symbol id="i-linkout" viewBox="0 0 24 24"><path d="M7 17L17 7M8 7h9v9"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V5M7 9.5l5-5 5 5M5 20h14"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 20h18M6.5 20v-8M12 20V5M17.5 20v-5"/></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 1 1 3.6 2.4c-.8.5-1.2 1-1.2 2M12 17h.01"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.8h.01"/></symbol>
+  <symbol id="i-mail" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 7.5L12 13l8.5-5.5"/></symbol>
+  <symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5l12 7.5-12 7.5z"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6.5" height="6.5" rx="1"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1"/></symbol>
+  <symbol id="i-filter" viewBox="0 0 24 24"><path d="M3.5 5h17l-6.5 8v5.5l-4 1.5v-7z"/></symbol>
+  <symbol id="i-wip" viewBox="0 0 24 24"><path d="M7 3h10M7 21h10M8 3v3.5c0 2 4 3.5 4 5.5s-4 3.5-4 5.5V21M16 3v3.5c0 2-4 3.5-4 5.5s4 3.5 4 5.5V21"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7"/></symbol>
+  <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.7.6 1 1.4 1 2.5h6c0-1.1.3-1.9 1-2.5A6 6 0 0 0 12 3z"/></symbol>
+  <symbol id="i-swap" viewBox="0 0 24 24"><path d="M4 8h15M15.5 4.5L19 8l-3.5 3.5M20 16H5M8.5 12.5L5 16l3.5 3.5"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.6-5.9M20 4v4.5h-4.5"/></symbol>
+</svg>
+
 <header id="topbar">
-  <button id="btn-cattree" type="button" title="Разделы">☰</button>
-  <button id="btn-home" type="button" title="Все книги">📚</button>
-  <button id="btn-toc" type="button" title="Оглавление">☰</button>
-  <button id="btn-search" type="button" title="Поиск (по книге или по всей библиотеке)">🔍</button>
-  <button id="btn-bookmark" type="button" title="Закладка на текущем месте">🔖</button>
-  <button id="btn-clips" type="button" title="Вырезки и сборники — всё, что вы выделили и записали">✂</button>
-  <button id="btn-mtmode" type="button" title="Режим перевода: тап по слову — выделить, тап по второму — фраза целиком">🌐</button>
-  <button id="btn-gloss" type="button" title="Подстрочник: перевод под словом" hidden>🔤</button>
+  <button id="btn-cattree" type="button" title="Разделы"><svg class="ico" aria-hidden="true"><use href="#i-menu"/></svg></button>
+  <button id="btn-home" type="button" title="Все книги"><svg class="ico" aria-hidden="true"><use href="#i-library"/></svg></button>
+  <button id="btn-toc" type="button" title="Оглавление"><svg class="ico" aria-hidden="true"><use href="#i-list"/></svg></button>
+  <button id="btn-search" type="button" title="Поиск (по книге или по всей библиотеке)"><svg class="ico" aria-hidden="true"><use href="#i-search"/></svg></button>
+  <button id="btn-bookmark" type="button" title="Закладка на текущем месте"><svg class="ico" aria-hidden="true"><use href="#i-bookmark"/></svg></button>
+  <button id="btn-clips" type="button" title="Вырезки и сборники — всё, что вы выделили и записали"><svg class="ico" aria-hidden="true"><use href="#i-scissors"/></svg></button>
+  <button id="btn-mtmode" type="button" title="Режим перевода: тап по слову — выделить, тап по второму — фраза целиком"><svg class="ico" aria-hidden="true"><use href="#i-globe"/></svg></button>
+  <button id="btn-gloss" type="button" title="Подстрочник: перевод под словом" hidden><svg class="ico" aria-hidden="true"><use href="#i-gloss"/></svg></button>
   <div id="chapter-title">Загрузка…</div>
-  <button id="btn-warn" type="button" title="Ошибки контракта" hidden>⚠</button>
+  <button id="btn-warn" type="button" title="Ошибки контракта" hidden><svg class="ico" aria-hidden="true"><use href="#i-alert"/></svg></button>
   <button id="btn-vis" type="button" title="Видимость языков">⇅</button>
-  <button id="btn-settings" type="button" title="Настройки">⚙</button>
+  <button id="btn-settings" type="button" title="Настройки"><svg class="ico" aria-hidden="true"><use href="#i-settings"/></svg></button>
 </header>
 <div id="progress"><i></i></div>
 
@@ -91,7 +128,7 @@
 </footer>
 
 <!-- режим «комикс» (SPEC 3.4e): книга кадр за кадром во весь экран; app.js, блок «КОМИКС» -->
-<button id="btn-comic" type="button" hidden title="Листать книгу кадрами">▶ Листать</button>
+<button id="btn-comic" type="button" hidden title="Листать книгу кадрами"><svg class="ico" aria-hidden="true"><use href="#i-play"/></svg> Листать</button>
 <div id="comic" hidden aria-roledescription="комикс">
   <div class="cm-top">
     <button id="cm-close" type="button" title="К тексту книги" aria-label="К тексту книги">✕</button>
@@ -99,7 +136,7 @@
     <span id="cm-count"></span>
   </div>
   <div id="cm-stage"></div>
-  <div id="cm-hint" hidden>↻ Поверните телефон — кадр станет крупнее</div>
+  <div id="cm-hint" hidden><svg class="ico" aria-hidden="true"><use href="#i-refresh"/></svg> Поверните телефон — кадр станет крупнее</div>
   <div id="cm-cap"></div>
   <div class="cm-nav">
     <button id="cm-prev" type="button" aria-label="Назад">‹</button>
@@ -174,19 +211,19 @@
     <div id="set-fonts"></div>
     <div id="set-gloss"></div>
     <div class="backup-row">
-      <button type="button" id="set-reset">↺ Оформление по умолчанию</button>
-      <button type="button" id="set-export">⬇ Экспорт</button>
-      <button type="button" id="set-import-btn">⬆ Импорт</button>
+      <button type="button" id="set-reset"><svg class="ico" aria-hidden="true"><use href="#i-refresh"/></svg> Оформление по умолчанию</button>
+      <button type="button" id="set-export"><svg class="ico" aria-hidden="true"><use href="#i-download"/></svg> Экспорт</button>
+      <button type="button" id="set-import-btn"><svg class="ico" aria-hidden="true"><use href="#i-upload"/></svg> Импорт</button>
       <input type="file" id="set-import" accept="application/json,.json" hidden>
     </div>
     <label class="row">Режим проверки (валидатор)
       <input id="set-debug" type="checkbox">
     </label>
-    <button type="button" id="btn-mtset" class="link-btn">⇄ Перевод через ИИ</button>
-    <button type="button" id="btn-account" class="link-btn">👤 Аккаунт</button>
-    <button type="button" id="btn-stats" class="link-btn">📊 Статистика</button>
-    <button type="button" id="btn-help" class="link-btn">❔ Справка</button>
-    <button type="button" id="btn-about" class="link-btn">ℹ О приложении</button>
+    <button type="button" id="btn-mtset" class="link-btn"><svg class="ico" aria-hidden="true"><use href="#i-swap"/></svg> Перевод через ИИ</button>
+    <button type="button" id="btn-account" class="link-btn"><svg class="ico" aria-hidden="true"><use href="#i-user"/></svg> Аккаунт</button>
+    <button type="button" id="btn-stats" class="link-btn"><svg class="ico" aria-hidden="true"><use href="#i-chart"/></svg> Статистика</button>
+    <button type="button" id="btn-help" class="link-btn"><svg class="ico" aria-hidden="true"><use href="#i-help"/></svg> Справка</button>
+    <button type="button" id="btn-about" class="link-btn"><svg class="ico" aria-hidden="true"><use href="#i-info"/></svg> О приложении</button>
   </div>
 </div>
 
@@ -229,7 +266,7 @@
     <p class="about-line acc-note" id="mt-model-state"></p>
     <div id="mt-model-quick" class="chips"></div>
     <div class="backup-row">
-      <button type="button" id="mt-model-reload">↻ Обновить список моделей</button>
+      <button type="button" id="mt-model-reload"><svg class="ico" aria-hidden="true"><use href="#i-refresh"/></svg> Обновить список моделей</button>
     </div>
     <p class="about-line acc-note">Список берётся с самого OpenRouter, поэтому в нём всегда актуальные модели и цены (за миллион токенов). Платит владелец ключа — то есть вы.</p>
 
@@ -268,13 +305,13 @@
 
     <h3 class="sheet-sub">Кнопки</h3>
     <ul>
-      <li><b>📚</b> — все книги (библиотека).</li>
-      <li><b>☰</b> — оглавление и список закладок.</li>
-      <li><b>🔍</b> — поиск по книге (оба языка; арабский — без учёта огласовок).</li>
-      <li><b>🔖</b> — поставить/снять закладку на текущем месте.</li>
-      <li><b>✂</b> — вырезки и тематические сборники.</li>
+      <li><b><svg class="ico" aria-hidden="true"><use href="#i-library"/></svg></b> — все книги (библиотека).</li>
+      <li><b><svg class="ico" aria-hidden="true"><use href="#i-list"/></svg></b> — оглавление и список закладок.</li>
+      <li><b><svg class="ico" aria-hidden="true"><use href="#i-search"/></svg></b> — поиск по книге (оба языка; арабский — без учёта огласовок).</li>
+      <li><b><svg class="ico" aria-hidden="true"><use href="#i-bookmark"/></svg></b> — поставить/снять закладку на текущем месте.</li>
+      <li><b><svg class="ico" aria-hidden="true"><use href="#i-scissors"/></svg></b> — вырезки и тематические сборники.</li>
       <li><b>⇅</b> — видимость языков: оба → только один → только другой → <b>самопроверка</b> в обе стороны (один язык за заглушкой — вспомни, тапни по абзацу, проверь себя).</li>
-      <li><b>⚙</b> — настройки.</li>
+      <li><b><svg class="ico" aria-hidden="true"><use href="#i-settings"/></svg></b> — настройки.</li>
       <li><b>‹ ›</b> — предыдущая / следующая глава.</li>
       <li><b>стр. N</b> — переход к номеру страницы; <b>скан</b> — фото страницы (если есть).</li>
     </ul>
@@ -297,19 +334,19 @@
 
     <h3 class="sheet-sub">Машинный перевод</h3>
     <ul>
-      <li><b>🌐 в верхней панели</b> — режим перевода: <b>тап по слову</b> выделяет слово, <b>тап по второму слову</b> — всю фразу между ними, кнопка «Весь абзац» — абзац целиком. Системное меню («Копировать / Поиск») в этом режиме не появляется вовсе — оно и мешало.</li>
-      <li>Можно и по-старому: выделить текст пальцем → «<b>⇄ Перевод</b>» в всплывшей панели. Но тогда системное меню будет лезть поверх.</li>
-      <li><b>Промпт</b> — своя команда ИИ: «Точно», «Дословно», «Подробно», «С примерами», «Грамматика» или ваша собственная (⚙ → Перевод через ИИ). Переключается прямо в карточке, так что один фрагмент можно переспросить по-разному.</li>
+      <li><b><svg class="ico" aria-hidden="true"><use href="#i-globe"/></svg> в верхней панели</b> — режим перевода: <b>тап по слову</b> выделяет слово, <b>тап по второму слову</b> — всю фразу между ними, кнопка «Весь абзац» — абзац целиком. Системное меню («Копировать / Поиск») в этом режиме не появляется вовсе — оно и мешало.</li>
+      <li>Можно и по-старому: выделить текст пальцем → «<b><svg class="ico" aria-hidden="true"><use href="#i-swap"/></svg> Перевод</b>» в всплывшей панели. Но тогда системное меню будет лезть поверх.</li>
+      <li><b>Промпт</b> — своя команда ИИ: «Точно», «Дословно», «Подробно», «С примерами», «Грамматика» или ваша собственная (<svg class="ico" aria-hidden="true"><use href="#i-settings"/></svg> → Перевод через ИИ). Переключается прямо в карточке, так что один фрагмент можно переспросить по-разному.</li>
       <li><b>Быстро</b> — бесплатный словарный движок, без ключа. <b>ИИ</b> — связный перевод с учётом контекста, нужен ключ.</li>
-      <li>Машинный перевод <b>никогда не встаёт в текст книги</b> рядом с выверенным человеческим: на арабском Корана и хадисов машина регулярно ошибается в смысле, а на вид они неразличимы. В книгу его можно положить только кнопкой «<b>✎ В заметку</b>», и там он подписан как машинный.</li>
+      <li>Машинный перевод <b>никогда не встаёт в текст книги</b> рядом с выверенным человеческим: на арабском Корана и хадисов машина регулярно ошибается в смысле, а на вид они неразличимы. В книгу его можно положить только кнопкой «<b><svg class="ico" aria-hidden="true"><use href="#i-pencil"/></svg> В заметку</b>», и там он подписан как машинный.</li>
     </ul>
 
     <h3 class="sheet-sub">Пометки, вырезки, сборники</h3>
     <ul>
-      <li><b>Выделите текст</b> → всплывёт панель: цветной кружок красит фрагмент, «<b>✎ Заметка</b>» сразу открывает поле для мысли.</li>
+      <li><b>Выделите текст</b> → всплывёт панель: цветной кружок красит фрагмент, «<b><svg class="ico" aria-hidden="true"><use href="#i-pencil"/></svg> Заметка</b>» сразу открывает поле для мысли.</li>
       <li><b>Тап по выделению</b> — открыть пометку: сменить цвет, дописать заметку, навесить теги, положить в сборник. Удаление — там же, одним касанием ничего не пропадает.</li>
-      <li><b>🔖</b> — закладка на текущем месте (пометка без фрагмента). Все пометки книги — в оглавлении (☰); «<b>↗</b>» копирует ссылку на это место.</li>
-      <li><b>✂ Вырезки</b> — свод всего выделенного и записанного <b>по всем книгам сразу</b>, с поиском и фильтрами по книге, тегу и цвету.</li>
+      <li><b><svg class="ico" aria-hidden="true"><use href="#i-bookmark"/></svg></b> — закладка на текущем месте (пометка без фрагмента). Все пометки книги — в оглавлении (<svg class="ico" aria-hidden="true"><use href="#i-list"/></svg>); «<b><svg class="ico" aria-hidden="true"><use href="#i-linkout"/></svg></b>» копирует ссылку на это место.</li>
+      <li><b><svg class="ico" aria-hidden="true"><use href="#i-scissors"/></svg> Вырезки</b> — свод всего выделенного и записанного <b>по всем книгам сразу</b>, с поиском и фильтрами по книге, тегу и цвету.</li>
       <li><b>Сборники</b> — подборки вырезок по теме, собранные из разных книг. Готовый сборник копируется как текст (markdown) — в заметки, в статью, в разговор.</li>
       <li>Текст вырезки сохраняется <b>снимком</b>: подборка читается, даже если книга сейчас недоступна.</li>
     </ul>
@@ -348,9 +385,9 @@
 
 <div id="sel-toolbar" hidden>
   <span id="sel-colors" class="palette"></span>
-  <button id="sel-note" type="button" title="Выделить и сразу записать мысль">✎ Заметка</button>
-  <button id="sel-mt" type="button" title="Машинный перевод выделенного фрагмента">⇄ Перевод</button>
-  <button id="sel-err" type="button" title="Сообщить об ошибке в этом фрагменте — откроется письмо с уже заполненным местом (глава, сектор, страница)">✉ Ошибка?</button>
+  <button id="sel-note" type="button" title="Выделить и сразу записать мысль"><svg class="ico" aria-hidden="true"><use href="#i-pencil"/></svg> Заметка</button>
+  <button id="sel-mt" type="button" title="Машинный перевод выделенного фрагмента"><svg class="ico" aria-hidden="true"><use href="#i-swap"/></svg> Перевод</button>
+  <button id="sel-err" type="button" title="Сообщить об ошибке в этом фрагменте — откроется письмо с уже заполненным местом (глава, сектор, страница)"><svg class="ico" aria-hidden="true"><use href="#i-mail"/></svg> Ошибка?</button>
 </div>
 
 <!-- Машинный перевод живёт ТОЛЬКО здесь, поверх текста, и никогда не попадает
@@ -360,7 +397,7 @@
      оказывалось ровно там же, где системное «Копировать / Поиск», и тонуло под ним. -->
 <div id="mt-card" hidden>
   <div class="mt-head">
-    <span class="mt-badge">⚡ машинный перевод</span>
+    <span class="mt-badge"><svg class="ico" aria-hidden="true"><use href="#i-zap"/></svg> машинный перевод</span>
     <span id="mt-source" class="mt-source"></span>
     <button id="mt-close" type="button" title="Закрыть">✕</button>
   </div>
@@ -369,8 +406,8 @@
     <span id="mt-prompts" class="mt-prompts"></span>
     <span id="mt-providers" class="mt-providers"></span>
     <span class="mt-actions">
-      <button id="mt-to-note" type="button">✎ В заметку</button>
-      <button id="mt-copy" type="button">⧉ Копировать</button>
+      <button id="mt-to-note" type="button"><svg class="ico" aria-hidden="true"><use href="#i-pencil"/></svg> В заметку</button>
+      <button id="mt-copy" type="button"><svg class="ico" aria-hidden="true"><use href="#i-copy"/></svg> Копировать</button>
     </span>
   </div>
 </div>
@@ -387,7 +424,7 @@
   <div class="mtsel-actions">
     <button id="mtsel-all" type="button">Весь абзац</button>
     <button id="mtsel-clear" type="button">Снять</button>
-    <button id="mtsel-go" type="button" class="primary">⇄ Перевести</button>
+    <button id="mtsel-go" type="button" class="primary"><svg class="ico" aria-hidden="true"><use href="#i-swap"/></svg> Перевести</button>
   </div>
 </div>
 
@@ -407,7 +444,7 @@
     <h3 class="sheet-sub">Сборники</h3>
     <div id="mark-colls" class="chips"></div>
     <div class="filter-actions">
-      <button id="mark-delete" type="button">🗑 Удалить</button>
+      <button id="mark-delete" type="button"><svg class="ico" aria-hidden="true"><use href="#i-trash"/></svg> Удалить</button>
       <button id="mark-save" type="button" class="primary">Сохранить</button>
     </div>
   </div>

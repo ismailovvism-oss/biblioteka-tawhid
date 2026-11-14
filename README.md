@@ -37,6 +37,7 @@ tools/validate.js CLI-валидатор контракта книги (Node.js)
 tools/doctor.js   аудит библиотеки целиком: реестр, поля, связность
 tools/import-bok.js импорт одноязычной книги из формата Шамили 3 (.bok)
 tools/gen-icons.js генератор иконок PWA (без зависимостей)
+tools/gen-thumbs.js миниатюры обложек для полки + поле thumb в реестре (нужен ImageMagick)
 ```
 
 PWA: при открытии по HTTPS (или с `localhost`) читалку можно установить на

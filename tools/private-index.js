@@ -45,6 +45,8 @@ for (const name of fs.readdirSync(DIR).sort()) {
   if (Array.isArray(m.authors) && m.authors.length) entry.authors = m.authors;
   if (m.description) entry.description = m.description;
   if (fs.existsSync(path.join(DIR, name, 'cover.jpg'))) entry.cover = `books-private/${name}/cover.jpg`;
+  // миниатюра для полки — её создаёт tools/gen-thumbs.js
+  if (entry.cover && fs.existsSync(path.join(DIR, name, 'cover-thumb.jpg'))) entry.thumb = `books-private/${name}/cover-thumb.jpg`;
   books.push(entry);
   console.log(`  · ${id} — ${(m.chapters || []).filter(c => c.file).length} глав`);
 }
