@@ -9,9 +9,12 @@
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <link rel="icon" type="image/png" href="icons/favicon.png">
 <title>Библиотека Таухид</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Amiri&family=Literata&family=Noto+Naskh+Arabic&family=Noto+Sans+Arabic&family=PT+Sans&family=PT+Serif&family=Scheherazade+New&display=swap">
+<!-- crossorigin — не украшение: без него ответ «непрозрачный», и воркер (sw.js) не может
+     положить таблицу шрифтов в кеш. Тогда без сети текст остаётся без своих шрифтов, а при
+     молчащем Google первый показ страницы ждёт эту таблицу. -->
+<link rel="stylesheet" crossorigin href="https://fonts.googleapis.com/css2?family=Amiri&family=Literata&family=Noto+Naskh+Arabic&family=Noto+Sans+Arabic&family=PT+Sans&family=PT+Serif&family=Scheherazade+New&display=swap">
 <link rel="stylesheet" href="style.css">
 </head>
 <body data-theme="light" data-layout="v" data-view="library">

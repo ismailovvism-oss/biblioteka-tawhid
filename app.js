@@ -174,6 +174,10 @@ let warnings = [];
 let activeEl = null;      // DOM активной пары
 let fnJump = null;        // { origin, fn } для механики «скачок-возврат»
 const chapterCache = new Map(); // "<bookId>/<file>" → { pairs, warnings }
+/* Главы на экране, чья сохранённая копия уже заменена свежей (воркер прислал `updated`).
+   Читателю предложили показать новый текст; не нажал — при следующем заходе в главу берём
+   её заново, а не из памяти: иначе правка так и не дошла бы до конца сеанса. */
+const staleChapters = new Set();
 
 /* ===== что лежит в потоке: глава книги или вся статья =====
  * Книга читается по главам: в потоке одна глава, её номер — `chapterIndex`.
@@ -203,10 +207,42 @@ const $ = s => document.querySelector(s);
 const stream = $('#stream');
 
 /* ===== загрузка ===== */
-async function fetchText(path) {
-  const res = await fetch(path);
-  if (!res.ok) throw new Error(`${path}: HTTP ${res.status}`);
-  return res.text();
+/* Сервер может не ответить вовсе: соединение принято, а ответа нет. Без срока такой запрос
+   висит минутами, и «Загрузка…» висит вместе с ним. Сохранённое на устройстве воркер
+   (sw.js) отдаёт сразу, так что срок касается только того, чего на устройстве ещё нет. */
+const FETCH_TIMEOUT = 30000;
+
+/* Полоса «идёт загрузка» (body[data-busy], стиль — в style.css). Показываем, только если
+   сеть ждём дольше четверти секунды: сохранённое воркер отдаёт за миллисекунды, и полоса,
+   мигающая на каждом открытии, была бы шумом, а не сведением. */
+let ждёмСеть = 0, полосаСкоро = null;
+function сеть(шаг) {
+  ждёмСеть = Math.max(0, ждёмСеть + шаг);
+  if (ждёмСеть && !полосаСкоро && !document.body.dataset.busy) {
+    полосаСкоро = setTimeout(() => { полосаСкоро = null; if (ждёмСеть) document.body.dataset.busy = '1'; }, 250);
+  }
+  if (!ждёмСеть) { clearTimeout(полосаСкоро); полосаСкоро = null; delete document.body.dataset.busy; }
+}
+
+/* `opts.fresh` — мимо сохранённой копии: воркер пойдёт в сеть (с запасной копией ждёт её
+   недолго). `opts.timeout` — свой срок. У ошибки «сервер ответил, но не 200» есть поле
+   `status`: по нему отличают «файла нет» (404) от «сервер в беде» (429, 5xx, молчит). */
+async function fetchText(path, opts = {}) {
+  const ждать = opts.timeout || FETCH_TIMEOUT;
+  const стоп = new AbortController();
+  const срок = setTimeout(() => стоп.abort(), ждать);
+  сеть(+1);
+  try {
+    const res = await fetch(path, opts.fresh ? { signal: стоп.signal, cache: 'no-cache' } : { signal: стоп.signal });
+    if (!res.ok) throw Object.assign(new Error(`${path}: HTTP ${res.status}`), { status: res.status });
+    return await res.text();
+  } catch (err) {
+    if (err && err.name === 'AbortError') throw new Error(`${path}: сервер не ответил за ${ждать / 1000} с`);
+    throw err;
+  } finally {
+    clearTimeout(срок);
+    сеть(-1);
+  }
 }
 
 /* Приватная книга (BACKEND.md, фаза 2): статической базы у неё нет — файлы лежат в
@@ -303,6 +339,8 @@ async function loadChapter(i, targetId) {
   updateChapterNav();
   loading = true;
   $('#chapter-title').textContent = 'Загрузка…';
+  const ключ = bookId + '/' + book.chapters[i].file;
+  if (staleChapters.delete(ключ)) chapterCache.delete(ключ);   // свежая копия уже в кеше воркера
   try {
     const data = await loadChapterData(i);
     pairs = data.pairs;
@@ -1852,7 +1890,12 @@ function markRow(m, bid, { compact = false } = {}) {
   }
   go.addEventListener('click', () => {
     if (bid === bookId) gotoSector(m.sector, m.chapter);
-    else openBook(library.find(b => b.id === bid), { chapter: m.chapter, sector: m.sector });
+    else {
+      // непубличные книги подгружаются следом за полкой — в первые секунды записи может не быть
+      const запись = library.find(b => b.id === bid);
+      if (запись) openBook(запись, { chapter: m.chapter, sector: m.sector });
+      else toast('Эта книга ещё загружается — попробуйте через пару секунд');
+    }
   });
   li.appendChild(go);
 
@@ -3362,12 +3405,23 @@ function setTextSlw(el, text) {
   });
 }
 
-function toast(msg) {
+/* `action` = { label, run } — сообщение с кнопкой: висит дольше и ждёт нажатия. */
+function toast(msg, action) {
   const t = document.createElement('div');
   t.className = 'toast';
+  t.setAttribute('role', 'status');
   t.textContent = msg;
+  if (action) {
+    t.classList.add('has-action');
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = action.label;
+    b.addEventListener('click', () => { t.remove(); action.run(); });
+    t.appendChild(b);
+  }
   document.body.appendChild(t);
-  setTimeout(() => t.remove(), 2500);
+  setTimeout(() => t.remove(), action ? 12000 : 2500);
+  return t;
 }
 
 /* ===== скан страницы / иллюстрация ===== */
@@ -3917,20 +3971,42 @@ function foldChar(ch) {
   if (AR_FOLD[ch]) return AR_FOLD[ch];
   return ch.toLowerCase().replace('ё', 'е');
 }
+/* Свёртка буквы — чистая функция, а текста в библиотеке мегабайты: ответ на каждую букву
+   запоминаем. И огласовку ищем регулярным выражением только там, где она возможна: весь
+   набор AR_DIACRITICS лежит в U+0610…U+06ED, русской и английской букве проверка не нужна. */
+const свёрнуто = new Map();
+function fold(ch) {
+  let f = свёрнуто.get(ch);
+  if (f === undefined) { f = foldChar(ch); свёрнуто.set(ch, f); }
+  return f;
+}
+const выкинуть = ch => { const c = ch.charCodeAt(0); return c >= 0x0610 && c <= 0x06ED && AR_DIACRITICS.test(ch); };
+
 // нормализованная строка + карта: норм-индекс → исходный индекс (для сниппета)
 function normalizeWithMap(str) {
   let norm = '';
   const map = [];
   for (let i = 0; i < str.length; i++) {
     const ch = str[i];
-    if (AR_DIACRITICS.test(ch)) continue; // огласовки/татвиль выкидываем
-    norm += foldChar(ch);
-    map.push(i);
+    if (выкинуть(ch)) continue; // огласовки/татвиль выкидываем
+    const f = fold(ch);
+    norm += f;
+    // свёртка изредка даёт два знака вместо одного («İ» → «i» с точкой): карта обязана
+    // оставаться той же длины, что и строка, иначе смещения уедут до конца сектора
+    for (let k = 0; k < f.length; k++) map.push(i);
   }
   return { norm, map };
 }
+/* То же без карты. Обязана давать РОВНО ту же строку, что normalizeWithMap: поиск сравнивает
+   по этой, а смещения найденного переводит картой той. Карта — массив на каждый знак текста;
+   держать её для всей библиотеки нельзя, поэтому её строят только найденному сектору. */
 function normalize(str) {
-  return normalizeWithMap(str).norm;
+  let norm = '';
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    if (!выкинуть(ch)) norm += fold(ch);
+  }
+  return norm;
 }
 
 // ── оценка совпадения ─────────────────────────────────────────────────────
@@ -4057,11 +4133,6 @@ function оценить(норм, запрос) {
   return { вес: вес * (1 + Math.log2(1 + всего) / 4), от: границы.от, до: границы.до };
 }
 
-const htmlToText = (() => {
-  const tmp = document.createElement('div');
-  return html => { tmp.innerHTML = html; return tmp.textContent || ''; };
-})();
-
 let searchSeq = 0;
 let pendingHit = null; // { ci, id, lang, start, end } — подсветить после перехода
 
@@ -4107,6 +4178,25 @@ function shownOffsets(member, start, end) {
   return [s, e];
 }
 
+/* Попадание посчитано по поисковому файлу, а он мог отстать от текста главы (правка без
+   пересборки файла). Сверяем сектор с тем, что реально загружено: совпал — смещения верны;
+   не совпал — пересчитываем их по живому тексту, а поисковый файл этой книги больше не
+   берём (до перезапуска читаем её по главам). Вернёт null, если в живом тексте запрос уже
+   не находится: тогда сектор только подсветится целиком. */
+function hitOffsets(r) {
+  const d = chapterData(r.ci);
+  const pair = d && d.pairs.find(p => p.id === r.id && p[r.lang] != null && (!p.lang || p.lang === r.lang));
+  if (!pair || !r.q || typeof r.text !== 'string') return [r.start, r.end];
+  const живой = htmlPlain(pair[r.lang]);
+  if (живой === r.text) return [r.start, r.end];
+  const чья = r.bookId || bookId;
+  searchStale.add(чья);
+  searchBooks.delete(чья);
+  const { norm, map } = normalizeWithMap(живой);
+  const оценка = оценить(norm, r.q);
+  return оценка ? [map[оценка.от], map[оценка.до - 1] + 1] : null;
+}
+
 // подсветить найденный фрагмент в нужном члене пары; раскрыть язык, если скрыт
 function applyPendingHit() {
   const r = pendingHit;
@@ -4119,7 +4209,8 @@ function applyPendingHit() {
   const vl = visibleLang();
   if (vl !== 'both' && vl !== r.lang) pairEl.classList.add('peek');
   const member = pairEl.querySelector(`.member.lang-${r.lang}`);
-  if (member) highlightRange(member, ...shownOffsets(member, r.start, r.end));
+  const места = member ? hitOffsets(r) : null;
+  if (места) highlightRange(member, ...shownOffsets(member, ...места));
   pairEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
   flash(pairEl);
 }
@@ -4160,102 +4251,239 @@ function highlightRange(root, start, end, cls = 'search-hit', data) {
   }
 }
 
-/* ===== поиск: внутри книги или по всей библиотеке ===== */
-// загрузчики, не трогающие глобалы текущей книги (своя кеш-карта)
-const searchManifests = new Map(); // id → manifest (+ _base)
-const searchChapters = new Map();  // `${id}/${file}` → данные главы
-async function searchManifest(entry) {
-  if (!searchManifests.has(entry.id)) {
-    const b = entry.base.endsWith('/') ? entry.base : entry.base + '/';
-    const m = JSON.parse(await fetchBookText(b + 'book.json', entry.private === true));
-    if (!Array.isArray(m.languages) || !Array.isArray(m.chapters)) throw new Error('bad manifest');
-    if (!Array.isArray(m.rtl)) m.rtl = [];
-    m._base = b;
-    searchManifests.set(entry.id, m);
+/* ===== поиск: внутри книги или по всей библиотеке =====
+ *
+ * Текст книги для поиска — один файл search.json (собирает tools/gen-search.js; формат и
+ * сборка — в parser.js, searchIndex). Раньше поиск по библиотеке скачивал и разбирал все
+ * главы всех книг: ~240 запросов и около 20 секунд на первом поиске, а каждый следующий
+ * заново приводил весь текст к виду для сравнения. Теперь:
+ *   — книга приходит одним запросом и дальше лежит в кеше воркера;
+ *   — приведённый к виду для сравнения текст запоминается (`n`), а не строится на каждый поиск;
+ *   — сектор, где нет слов запроса, отсеивается сравнением подстроки, без разбора на слова, —
+ *     поэтому поиск успевает за набором и идёт по мере ввода;
+ *   — выдача показывается по мере прихода книг: одна застрявшая не держит остальные.
+ * Нет файла или он собран по другому тексту — собираем то же самое на месте из глав, тем же
+ * кодом: медленно, но верно.
+ */
+const searchBooks = new Map();   // id → Promise<{ langs, rtl, ch: [{ i, t, p, n }] }>
+const searchStale = new Set();   // книги, чей поисковый файл оказался старее текста: их читаем по главам
+const searchFailed = new Set();  // книги, которые не загрузились: в них не искали
+const SEARCH_RETRY_AFTER = 20000;
+
+const searchBase = entry => (entry.base.endsWith('/') ? entry.base : entry.base + '/');
+const негоден = почему => Object.assign(new Error(почему), { нетФайла: true });
+
+async function searchFromFile(entry) {
+  if (searchStale.has(entry.id)) throw негоден('stale search file');
+  const текст = await fetchBookText(searchBase(entry) + 'search.json', entry.private === true);
+  let d;
+  try { d = JSON.parse(текст); } catch { throw негоден('bad search file'); }
+  if (!d || d.v !== 1 || !Array.isArray(d.langs) || !Array.isArray(d.ch)) throw негоден('bad search file');
+  /* Файл собран по этому тексту? Он производный и может отстать: текст поправили или
+     главу добавили (например, из Вычитки), а файл не пересобрали. Отставший файл хуже
+     отсутствующего — новой главы в нём нет вовсе, а подсветка старых ложится мимо. Дешёвая
+     сверка: число глав и слов в файле (`c`) против того же в реестре (`counts`); оба
+     считает один код, contract.js. Не сошлось — читаем книгу по главам. Правку, не
+     меняющую числа, ловит hitOffsets при переходе к найденному. */
+  if (d.c && entry.counts && (d.c.chapters !== entry.counts.chapters || d.c.words !== entry.counts.words)) {
+    throw негоден('stale search file');
   }
-  return searchManifests.get(entry.id);
+  if (!Array.isArray(d.rtl)) d.rtl = [];
+  return d;
 }
-async function searchChapter(entry, m, ci) {
-  const key = entry.id + '/' + m.chapters[ci].file;
-  if (!searchChapters.has(key)) {
-    const texts = {};
+
+// запасной путь: главы по одной (языки главы — разом), итог тот же, что лежал бы в файле
+async function searchFromChapters(entry) {
+  const b = searchBase(entry), приватная = entry.private === true;
+  const m = JSON.parse(await fetchBookText(b + 'book.json', приватная));
+  if (!Array.isArray(m.languages) || !Array.isArray(m.chapters)) throw new Error('bad manifest');
+  const texts = {};
+  for (const гл of m.chapters) {
+    if (!гл || !гл.file) continue;
+    const по = {};
     await Promise.all(m.languages.map(async lang => {
-      // приватная книга ищется тоже — через подписанный URL, иначе она молча выпадет из поиска
-      try { texts[lang] = await fetchBookText(`${m._base}${lang}/${m.chapters[ci].file}`, entry.private === true); }
-      catch { texts[lang] = ''; }
+      // приватная книга ищется тоже — через подписанный URL, иначе она молча выпадет из поиска;
+      // нет файла для языка — глава односторонняя, это не ошибка
+      try { по[lang] = await fetchBookText(`${b}${lang}/${гл.file}`, приватная); } catch { по[lang] = ''; }
     }));
-    searchChapters.set(key, buildChapter(texts, m.languages));
+    texts[гл.file] = по;
   }
-  return searchChapters.get(key);
+  return searchIndex(m, texts);
 }
-function searchChapterTitle(m, ci) {
-  const t = m.chapters[ci].title || {};
-  return t.ru || Object.values(t).find(Boolean) || `Глава ${ci + 1}`;
+
+function searchBook(entry) {
+  if (!searchBooks.has(entry.id)) {
+    const p = searchFromFile(entry).catch(err => {
+      /* По главам идём, только когда файла нет или он негоден. Сервер отказал (429, 5xx),
+         не ответил или молчит — НЕ идём: это десятки запросов на книгу, больной сервер они
+         добьют, а хостинг за такую очередь закрывает читателю адрес. У непубличной книги
+         из бакета ошибки своего вида, и файла там обычно нет — ей запасной путь всегда. */
+      if ((err && (err.нетФайла || err.status === 404)) || entry.private === true) return searchFromChapters(entry);
+      throw err;
+    });
+    p.then(() => searchFailed.delete(entry.id), () => {
+      searchFailed.add(entry.id);
+      // не повторяем на каждую букву: следующая попытка — не раньше, чем через паузу
+      setTimeout(() => { if (searchBooks.get(entry.id) === p) searchBooks.delete(entry.id); }, SEARCH_RETRY_AFTER);
+    });
+    searchBooks.set(entry.id, p);
+  }
+  return searchBooks.get(entry.id);
+}
+
+/* Тексты нужных книг. Разом тянем не больше SEARCH_POOL: очередь из десятков запросов
+   хостинг принимает за атаку. `onBook(k, данные|null)` зовётся по мере прихода каждой. */
+const SEARCH_POOL = 4;
+async function loadSearchBooks(entries, onBook) {
+  let next = 0;
+  const worker = async () => {
+    while (next < entries.length) {
+      const k = next++;
+      let d = null;
+      try { d = await searchBook(entries[k]); } catch { d = null; }
+      if (onBook) onBook(k, d);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(SEARCH_POOL, entries.length) }, worker));
 }
 
 let searchScopeMode = 'library'; // 'book' | 'library'
+// черновик — запись без текста: искать в ней нечего
+const searchEntries = () => (searchScopeMode === 'library' || !bookId
+  ? library.filter(e => !e.draft)
+  : library.filter(e => e.id === bookId));
+/* Заранее, пока читатель набирает запрос, тянем тексты — но только пока библиотека
+   невелика: на сотнях книг это были бы сотни мегабайт ради поиска, которого может и не быть.
+   Тогда тексты приедут по первому запросу. */
+const SEARCH_WARM_MAX = 40;
 function setSearchScope(mode) {
   searchScopeMode = mode;
   $('#search-scope').querySelectorAll('.chip').forEach(c => c.classList.toggle('active', c.dataset.scope === mode));
   $('#search-input').placeholder = mode === 'library' ? 'Поиск по всей библиотеке…' : 'Поиск по книге…';
+  const нужные = searchEntries();
+  if (нужные.length <= SEARCH_WARM_MAX) loadSearchBooks(нужные);   // не ждём
 }
 
 const SEARCH_CAP = 300;        // сколько показываем
 const SEARCH_SCAN = 2000;      // сколько собираем, прежде чем ранжировать
+
+/* Пройти по уже загруженным книгам. `books[k]`: данные — искали; null — не загрузилась;
+   undefined — ещё едет. */
+function scanBooks(entries, books, запрос) {
+  const нужно = Math.ceil(запрос.length / 2);   // меньше половины слов запроса — оценить() откажет
+  const results = [];
+  let capped = false;
+  scan:
+  for (let k = 0; k < entries.length; k++) {
+    const d = books[k], entry = entries[k];
+    if (!d) continue;
+    const bookTitle = entryLabel(entry), kind = kindLabel(entry);
+    for (const гл of d.ch) {
+      // текст, приведённый к виду для сравнения, — один раз на главу, а не на каждый поиск
+      if (!гл.n) гл.n = гл.p.map(row => row.map((t, j) => (j && t ? normalize(t) : null)));
+      for (let r = 0; r < гл.p.length; r++) {
+        const row = гл.p[r], норм = гл.n[r];
+        for (let j = 1; j < row.length; j++) {
+          const n = норм[j];
+          if (!n) continue;
+          /* Дешёвый отсев. Слово запроса засчитывается и как часть слова текста (см.
+             `подходит`), значит, без подстроки совпадения нет — такой сектор на слова не
+             разбираем. Это и даёт скорость: разбор на слова идёт по единицам секторов. */
+          let есть = 0;
+          for (const с of запрос) if (n.includes(с)) есть++;
+          if (есть < нужно) continue;
+          const оценка = оценить(n, запрос);
+          if (!оценка) continue;
+          const text = row[j], lang = d.langs[j - 1];
+          const { map } = normalizeWithMap(text);   // карта смещений — только найденному
+          results.push({
+            bookId: entry.id, bookTitle, kind,
+            ci: гл.i, chTitle: гл.t,
+            id: row[0], lang, rtl: d.rtl.includes(lang),
+            text, q: запрос, вес: оценка.вес,
+            start: map[оценка.от], end: map[оценка.до - 1] + 1,
+          });
+          if (results.length >= SEARCH_SCAN) { capped = true; break scan; }
+        }
+      }
+    }
+  }
+  // сверху то, что ближе к запросу: сперва точная фраза, потом рядом, потом врозь
+  results.sort((a, b) => b.вес - a.вес);
+  return { results, capped };
+}
+
 async function runSearch(raw) {
+  const seq = ++searchSeq;   // любой новый вызов отменяет идущий — и тот, что кончится на «мало букв»
   const норма = normalize(raw).trim();
   const запрос = норма.match(СЛОВО) || [];
   const box = $('#search-results');
   if (норма.length < 2 || !запрос.length) { box.textContent = 'Введите минимум 2 символа.'; return; }
-  const seq = ++searchSeq;
-  box.textContent = 'Поиск…';
   const libraryScope = searchScopeMode === 'library' || !bookId;
-  const entries = libraryScope ? library : library.filter(e => e.id === bookId);
-  const results = [];
-  let capped = false;
-  for (const entry of entries) {
-    let m;
-    try { m = await searchManifest(entry); } catch { continue; }
-    if (seq !== searchSeq) return; // запущен новый поиск — бросаем этот
-    for (let ci = 0; ci < m.chapters.length; ci++) {
-      let data;
-      try { data = await searchChapter(entry, m, ci); } catch { continue; }
-      if (seq !== searchSeq) return;
-      for (const pair of data.pairs) {
-        for (const lang of m.languages) {
-          if (pair[lang] == null) continue;
-          const text = htmlToText(pair[lang]);
-          const { norm, map } = normalizeWithMap(text);
-          const оценка = оценить(norm, запрос);
-          if (оценка) results.push({
-            bookId: entry.id, bookTitle: entryLabel(entry), kind: kindLabel(entry),
-            ci, chTitle: searchChapterTitle(m, ci),
-            id: pair.id, lang, rtl: m.rtl.includes(lang),
-            text, вес: оценка.вес,
-            start: map[оценка.от], end: map[оценка.до - 1] + 1,
-          });
-        }
-      }
-      if (results.length >= SEARCH_SCAN) { capped = true; break; }
-    }
-    if (capped) break;
-  }
-  if (seq !== searchSeq) return;
-  // сверху то, что ближе к запросу: сперва точная фраза, потом рядом, потом врозь
-  results.sort((a, b) => b.вес - a.вес);
-  renderResults(results.slice(0, SEARCH_CAP), raw.trim(), libraryScope,
-                capped || results.length > SEARCH_CAP, results.length);
+  const entries = searchEntries();
+  const books = new Array(entries.length);   // пусто — ещё едет
+  let приехало = 0, скоро = null;
+
+  const показать = () => {
+    скоро = null;
+    if (seq !== searchSeq) return;
+    const { results, capped } = scanBooks(entries, books, запрос);
+    renderResults(results.slice(0, SEARCH_CAP), raw.trim(), libraryScope,
+                  capped || results.length > SEARCH_CAP, results.length,
+                  { ждём: entries.length - приехало, всего: entries.length, сбой: books.filter(b => b === null).length });
+  };
+  /* Выдачу показываем по мере прихода книг, но не чаще, чем раз в 200 мс: когда всё уже в
+     памяти, книги «приезжают» разом, и перерисовка на каждую была бы лишней работой. Первый
+     показ откладываем на 150 мс — чтобы «Ищу…» не мигало на каждой букве. */
+  const показатьСкоро = сколько => { if (!скоро) скоро = setTimeout(показать, сколько); };
+  показатьСкоро(150);
+  await loadSearchBooks(entries, (k, d) => {
+    books[k] = d;
+    приехало++;
+    if (приехало < entries.length) показатьСкоро(200);
+  });
+  clearTimeout(скоро);
+  показать();
 }
 
-function renderResults(results, label, libraryScope, capped, всего = results.length) {
+// повторить поиск, заново запросив книги, которые не загрузились
+function retrySearch() {
+  for (const id of searchFailed) searchBooks.delete(id);
+  searchFailed.clear();
+  runSearch($('#search-input').value);
+}
+
+/* `ход` = { ждём, всего, сбой }: сколько книг ещё едет и сколько не загрузилось. Пока книги
+   едут, «ничего не найдено» говорить рано; а если часть не загрузилась, честный ответ —
+   «в них не искали», а не «там этого нет». */
+function renderResults(results, label, libraryScope, capped, всего = results.length, ход = {}) {
   const box = $('#search-results');
   box.innerHTML = '';
-  if (!results.length) { box.textContent = `Ничего не найдено: «${label}».`; return; }
+  const { ждём = 0, сбой = 0 } = ход;
+  const добавитьСбой = () => {
+    if (!сбой || ждём) return;
+    const d = document.createElement('div');
+    d.className = 'search-note';
+    d.append(`Не загрузилось книг: ${сбой} — в них не искали. `);
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = 'Повторить';
+    b.addEventListener('click', retrySearch);
+    d.appendChild(b);
+    box.appendChild(d);
+  };
+  if (!results.length) {
+    box.textContent = ждём ? `Ищу… ${ход.всего - ждём} из ${ход.всего}` : `Ничего не найдено: «${label}».`;
+    добавитьСбой();
+    return;
+  }
   const head = document.createElement('div');
   head.className = 'search-count';
   head.textContent = `Найдено: ${всего}${capped ? '+' : ''}`
-    + (всего > results.length ? ` · показаны ${results.length} самых точных` : '');
+    + (всего > results.length ? ` · показаны ${results.length} самых точных` : '')
+    + (ждём ? ` · ищу ещё в ${ждём} из ${ход.всего}…` : '');
   box.appendChild(head);
+  добавитьСбой();
   for (const r of results) {
     const item = document.createElement('button');
     item.type = 'button';
@@ -4303,9 +4531,22 @@ $('#search-scope').querySelectorAll('.chip').forEach(c => c.addEventListener('cl
   const q = $('#search-input').value;
   if (normalize(q).trim().length >= 2) runSearch(q);
 }));
+/* Поиск идёт по мере набора. Короткая задержка — чтобы не искать на каждую букву быстрого
+   набора; «Найти» и Enter ищут сразу, не дожидаясь её. */
+let searchTimer = null;
 $('#search-form').addEventListener('submit', e => {
   e.preventDefault();
+  clearTimeout(searchTimer);
   runSearch($('#search-input').value);
+});
+$('#search-input').addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    const q = $('#search-input').value;
+    if (normalize(q).trim().length >= 2) { runSearch(q); return; }
+    searchSeq++;                                 // запрос стёрли — идущий поиск уже не нужен
+    $('#search-results').textContent = '';
+  }, 200);
 });
 
 /* ===== библиотека (авторский список книг) ===== */
@@ -4847,7 +5088,23 @@ const SHELF_CHUNK = 60;
 let shelfObserver = null;
 let shelfOnScroll = null;
 
-function renderBookList(shown, view, host) {
+/* Полка помнит место. Ушли с полки в книгу — запоминаем прокрутку и сколько записей было
+   отрисовано; вернулись — встаём туда же, а не в начало списка. Действует только на возврат:
+   смена вкладки, раздела, фильтра или вида показывает новый список, и он начинается сверху.
+   `sig` — слепок того, что именно было на полке: вернулись к другому списку (открыли из
+   поиска запись другого типа, и «домой» ведёт на её вкладку) — старое место к нему не
+   относится. */
+let onShelf = false;       // на экране полка — не книга и не карточка книги
+let shelfDrawn = 0;        // сколько записей сейчас отрисовано (досыпка идёт порциями)
+let shelfReturn = null;    // { y, n, sig }
+const SHELF_RESTORE_MAX = 600;   // больше разом не рисуем даже ради возврата (см. про 3000 книг ниже)
+const shelfSig = () => JSON.stringify([shelfKind(), settings.shelfCat, settings.shelfFacets, shelfQuery, shelfSort(), settings.shelfView]);
+function leaveShelf() {
+  if (onShelf) shelfReturn = { y: window.scrollY, n: shelfDrawn, sig: shelfSig() };
+  onShelf = false;
+}
+
+function renderBookList(shown, view, host, минимум = 0) {
   if (shelfObserver) { shelfObserver.disconnect(); shelfObserver = null; }
   if (shelfOnScroll) { window.removeEventListener('scroll', shelfOnScroll); shelfOnScroll = null; }
 
@@ -4873,11 +5130,12 @@ function renderBookList(shown, view, host) {
      отрисовывает весь список разом — то есть ровно то, от чего мы уходим. Проверено
      на 3000 книг: вкладка вешалась намертво. Здесь же между порциями отдаём кадр
      браузеру, и прокрутка остаётся живой. */
-  const pump = () => {
-    const end = Math.min(i + SHELF_CHUNK, shown.length);
+  const pump = (сколько = SHELF_CHUNK) => {
+    const end = Math.min(i + сколько, shown.length);
     const frag = document.createDocumentFragment();
     for (; i < end; i++) frag.appendChild(make(shown[i]));
     box.appendChild(frag);
+    shelfDrawn = i;
 
     if (i >= shown.length) {
       if (shelfObserver) { shelfObserver.disconnect(); shelfObserver = null; }
@@ -4896,7 +5154,7 @@ function renderBookList(shown, view, host) {
   };
 
   shelfObserver = new IntersectionObserver(entries => {
-    if (entries.some(x => x.isIntersecting)) pump();
+    if (entries.some(x => x.isIntersecting)) pump();   // без аргумента: наблюдатель передал бы свой
   }, { rootMargin: '400px' });
   shelfObserver.observe(sentinel);
 
@@ -4909,10 +5167,20 @@ function renderBookList(shown, view, host) {
   };
   window.addEventListener('scroll', shelfOnScroll, { passive: true });
 
-  pump();
+  // при возврате на полку первая порция — столько, сколько было отрисовано до ухода:
+  // иначе вернуть прокрутку некуда, списка там ещё нет
+  shelfDrawn = 0;
+  pump(Math.max(SHELF_CHUNK, Math.min(минимум, SHELF_RESTORE_MAX)));
 }
 
-function renderLibrary() {
+/* `opts.keep` — перерисовать полку на месте, не дёргая прокрутку (обновился реестр). */
+function renderLibrary(opts = {}) {
+  let вернуть = null;
+  if (opts.keep && onShelf) вернуть = { y: window.scrollY, n: shelfDrawn };
+  else if (shelfReturn && shelfReturn.sig === shelfSig()) вернуть = shelfReturn;
+  shelfReturn = null;
+  // столько записей разом не рисуем, а без них прокрутке некуда встать — честнее начать сверху
+  if (вернуть && вернуть.n > SHELF_RESTORE_MAX) вернуть = null;
   if (!$('#comic').hidden) { $('#comic').hidden = true; document.body.classList.remove('comic-open'); }
   document.body.dataset.view = 'library';
   if (mtModeOn()) setMtMode(false);   // режим перевода живёт только внутри книги
@@ -5120,7 +5388,7 @@ function renderLibrary() {
   body.className = 'shelf-body';
   stream.appendChild(body);
 
-  const paint = () => {
+  const paint = (минимум = 0) => {
     const shown = sortShelf(underCat.filter(e =>
       entryMatchesFacets(e, facets) && entryMatchesQuery(e, shelfQuery)), shelfSort(вид));
     // «показано из скольких» — иначе непонятно, фильтр отсёк или книг столько и есть
@@ -5148,7 +5416,7 @@ function renderLibrary() {
       m.textContent = shelfQuery ? `Ничего не нашлось по запросу «${shelfQuery}».` : `По выбранным фильтрам ${kindMeta(вид).gen} нет.`;
       body.appendChild(m);
     } else {
-      renderBookList(shown, view, body);
+      renderBookList(shown, view, body, typeof минимум === 'number' ? минимум : 0);
     }
   };
 
@@ -5157,17 +5425,23 @@ function renderLibrary() {
     saveSettings();
     paint();
   });
-  paint();
+  paint(вернуть ? вернуть.n : 0);
   // подпись внизу полки (почта — только в «О приложении», не на главной)
   const brand = document.createElement('div');
   brand.className = 'brand';
   brand.textContent = 'Библиотека Таухид';
   stream.appendChild(brand);
-  window.scrollTo(0, 0);
+  // новый список начинается сверху; возврат из книги и перерисовка на месте — там, где были
+  // возврат — сразу на место: плавная прокрутка (html { scroll-behavior: smooth }) здесь
+  // была бы поездкой через весь список на глазах у читателя
+  if (вернуть) window.scrollTo({ top: вернуть.y, behavior: 'instant' });
+  else window.scrollTo(0, 0);
+  onShelf = true;
 }
 
 /* ===== карточка книги: большая обложка, автор, аннотация, кнопки чтения ===== */
 async function renderBookInfo(entry) {
+  leaveShelf();
   document.body.dataset.view = 'library';
   if (mtModeOn()) setMtMode(false);
   book = null;
@@ -5307,12 +5581,14 @@ function leaveReading() {
 }
 
 async function openBook(entry, opts = {}) {
+  leaveShelf();
   leaveReading();
   bookEntry = entry;
   bookId = entry.id;
   base = entry.base.endsWith('/') ? entry.base : entry.base + '/';
   privateBook = entry.private === true;   // непубличная книга → путь через бакет
   chapterCache.clear();
+  staleChapters.clear();
   comicCache.clear();
   document.body.dataset.view = 'reading';
   $('#chapter-title').textContent = 'Загрузка…';
@@ -5407,8 +5683,10 @@ function route() {
     openBook(infoEntry);
     return;
   }
-  if (infoEntry) renderBookInfo(infoEntry);
-  else renderLibrary();
+  if (infoEntry) { renderBookInfo(infoEntry); return; }
+  // записи из адреса нет — показываем полку, но помним, что шли не сюда (см. retryWanted)
+  wantedMiss = wanted || info || null;
+  renderLibrary();
 }
 window.addEventListener('popstate', () => {
   if (suppressPop) { suppressPop = false; if (backResolve) backResolve(); return; }
@@ -5441,9 +5719,9 @@ const backendReady = () => Boolean(window.SB && SB.configured());
    На GitHub Pages этой папки нет: fetch отвечает 404, и слагаемое просто пустое. */
 async function loadLocalBooks() {
   try {
-    const res = await fetch('books-private/index.json', { cache: 'no-cache' });
-    if (!res.ok) return [];
-    const data = await res.json();
+    // со сроком: на сайте этой папки нет, и молчащий сервер иначе держал бы и этот запрос,
+    // и всё, что ждёт его (refreshLibrary — а с ней и непубличные книги из бэкенда)
+    const data = JSON.parse(await fetchText('books-private/index.json', { fresh: true, timeout: 6000 }));
     return (data.books || []).map(b => Object.assign({}, b, { local: true }));
   } catch {
     return [];   // нет папки — это норма, а не поломка
@@ -5470,16 +5748,97 @@ async function loadPrivateBooks() {
 
 /* Одна и та же книга обычно есть и локально, и в бакете (папка проекта — исходник,
    бакет — копия для других устройств). На полке она должна быть ОДНА, и побеждает
-   локальная: та же книга, но без сети, без подписанных URL и с офлайном. */
-async function refreshLibrary() {
-  const [local, backend] = await Promise.all([loadLocalBooks(), loadPrivateBooks()]);
+   локальная: та же книга, но без сети, без подписанных URL и с офлайном.
+
+   Непубличные слагаемые помним отдельно (`extraBooks`): публичный реестр может обновиться
+   сам по себе (воркер принёс свежий index.json), и полку тогда надо пересобрать сразу,
+   не дожидаясь сети за непубличными. */
+let extraBooks = [];
+function composeLibrary() {
   const seen = new Set();
   library = [];
-  for (const b of staticLibrary.concat(local, backend)) {
+  for (const b of staticLibrary.concat(extraBooks)) {
     if (seen.has(b.id)) continue;
     seen.add(b.id);
     library.push(b);
   }
+}
+/** Перечитать непубличные книги и пересобрать полку. Возвращает true, если состав изменился. */
+let refreshGen = 0;
+async function refreshLibrary() {
+  const моё = ++refreshGen;
+  const [local, backend] = await Promise.all([loadLocalBooks(), loadPrivateBooks()]);
+  /* Пока ждали, запустили новое перечитывание (вышли из аккаунта) — этот ответ устарел.
+     Без проверки стартовый запрос, вернувшись после выхода, возвращал бы на полку
+     названия закрытых книг. */
+  if (моё !== refreshGen) return false;
+  const было = library.map(b => b.id + (b.local ? '+l' : '') + (b.private ? '+p' : '')).join('|');
+  extraBooks = local.concat(backend);
+  composeLibrary();
+  return было !== library.map(b => b.id + (b.local ? '+l' : '') + (b.private ? '+p' : '')).join('|');
+}
+
+/* Публичный реестр и дерево разделов → в память. Зовётся на старте и когда воркер сообщил,
+   что на сервере появилась свежая копия. */
+function applyRegistry(idxText, taxText) {
+  const idx = JSON.parse(idxText);
+  staticLibrary = Array.isArray(idx) ? idx : (idx.books || []);
+  // дерево категорий — отдельный файл taxonomy.json (плоский список узлов с parent)
+  try {
+    const tax = taxText ? JSON.parse(taxText) : null;
+    taxNodes = tax && Array.isArray(tax.categories) ? tax.categories : [];
+  } catch { taxNodes = []; }
+  buildTaxonomy();
+}
+
+/* Состав библиотеки изменился, пока читалка открыта. Полку перерисовываем на месте, не
+   дёргая прокрутку; открытую книгу и карточку не трогаем — новое увидят, вернувшись. */
+let shelfRedrawLater = false;
+function onLibraryChanged() {
+  if (retryWanted()) return;   // пришла запись, ради которой сюда шли по ссылке, — открываем её
+  // идёт поиск по тексту — в нём могли появиться новые книги
+  if (!$('#search').hidden && normalize($('#search-input').value).trim().length >= 2) runSearch($('#search-input').value);
+  if (!onShelf) return;
+  /* Перерисовка пересоздаёт панель полки вместе с полем поиска. Если в нём сейчас набирают
+     (или открыт список порядка), это отняло бы фокус и клавиатуру посреди слова — ждём,
+     пока читатель оттуда уйдёт. */
+  const где = document.activeElement;
+  if (где && где.closest && где.closest('.shelf-bar')) {
+    if (shelfRedrawLater) return;
+    shelfRedrawLater = true;
+    где.addEventListener('blur', () => { shelfRedrawLater = false; onLibraryChanged(); }, { once: true });
+    return;
+  }
+  // отрисовано больше, чем перерисовка умеет вернуть на место, — не дёргаем: обновится
+  // при следующем показе полки
+  if (shelfDrawn > SHELF_RESTORE_MAX) return;
+  renderLibrary({ keep: true });
+}
+
+/* Запись из адреса (?book=, ?info=) не нашлась — показали полку, а её id помним. Реестр на
+   устройстве мог устареть (статью опубликовали только что — по такой ссылке и приходят из
+   Telegram), а непубличные книги могли ещё не подгрузиться. Появилась — открываем, если
+   читатель всё ещё стоит на той полке, куда его принесло вместо записи. */
+let wantedMiss = null;
+const WANTED_WAIT = 1500;
+function retryWanted() {
+  if (!wantedMiss || !onShelf) return false;
+  if (!library.some(b => b.id === wantedMiss)) return false;
+  wantedMiss = null;
+  route();
+  return true;
+}
+
+async function reloadRegistry() {
+  try {
+    const [idxText, taxText] = await Promise.all([
+      fetchText('books/index.json'),
+      fetchText('books/taxonomy.json').catch(() => null),
+    ]);
+    applyRegistry(idxText, taxText);
+  } catch { return; }   // не вышло — живём с прежним реестром
+  composeLibrary();
+  onLibraryChanged();
 }
 
 async function renderAccount() {
@@ -5555,24 +5914,43 @@ async function init() {
   let authBack = null;
   if (backendReady()) { try { authBack = SB.consumeAuthCallback(); } catch { /* не мешаем старту */ } }
   try {
-    const idx = JSON.parse(await fetchText('books/index.json'));
-    staticLibrary = Array.isArray(idx) ? idx : (idx.books || []);
+    // реестр и дерево разделов друг от друга не зависят — тянем разом, а не по очереди
+    const [idxText, taxText] = await Promise.all([
+      fetchText('books/index.json'),
+      fetchText('books/taxonomy.json').catch(() => null),
+    ]);
+    applyRegistry(idxText, taxText);
     library = staticLibrary;
-    // дерево категорий — отдельный файл taxonomy.json (плоский список узлов с parent)
-    try {
-      const tax = JSON.parse(await fetchText('books/taxonomy.json'));
-      taxNodes = Array.isArray(tax.categories) ? tax.categories : [];
-    } catch { taxNodes = []; }
-    buildTaxonomy();
   } catch (err) {
     document.body.dataset.view = 'library';
     showLoadError('Не удалось загрузить список книг (books/index.json): ' + err.message);
     $('#chapter-title').textContent = 'Ошибка';
     return;
   }
-  // непубличные книги — уже поверх готового реестра: если бэкенд молчит, полка живёт
-  await refreshLibrary();
-  route();
+  /* Непубличные книги — поверх готового реестра, и первый показ они НЕ держат. Раньше полка
+     ждала ответа на books-private/index.json (которого на сайте нет вовсе) и ответа бэкенда;
+     при молчащем сервере это ожидание и было пустым экраном. Ждём их только тогда, когда
+     без них не решить маршрут: в адресе запись, которой нет в публичном реестре. */
+  const params = new URLSearchParams(location.search);
+  const нужна = params.get('book') || params.get('info');
+  const послеНепубличных = refreshLibrary().then(изменилась => { if (изменилась) onLibraryChanged(); });
+  if (нужна && !staticLibrary.some(b => b.id === нужна)) {
+    /* Причин две, и обе проверяем, прежде чем показать полку вместо записи: реестр на
+       устройстве устарел или запись непубличная. На всё — короткий срок (WANTED_WAIT):
+       при обычной связи свежий реестр приходит за доли секунды, и запись открывается сразу;
+       при медленной или молчащем сервере читатель не сидит перед пустым экраном —
+       показываем полку, а запись откроется сама, когда придёт (retryWanted). */
+    const свежийРеестр = Promise.all([
+      fetchText('books/index.json', { fresh: true }),
+      fetchText('books/taxonomy.json', { fresh: true }).catch(() => null),
+    ]).then(([idxText, taxText]) => { applyRegistry(idxText, taxText); composeLibrary(); }, () => {});
+    const всё = Promise.all([свежийРеестр, послеНепубличных]);
+    await Promise.race([всё, new Promise(готово => setTimeout(готово, WANTED_WAIT))]);
+    route();
+    всё.then(() => retryWanted());
+  } else {
+    route();
+  }
   // молча проглоченная неудача входа выглядит как «ссылка не работает» — сказать вслух
   if (authBack) {
     toast(authBack.status === 'signed-in'
@@ -5583,8 +5961,73 @@ async function init() {
 
 init();
 
-/* ===== PWA: офлайн через service worker ===== */
+/* ===== PWA: воркер (sw.js) — запуск с устройства и чтение без сети =====
+   Воркер отдаёт сохранённое сразу, а свежее тянет следом. Значит, на экране может оказаться
+   вчерашняя копия, когда на сервере уже лежит сегодняшняя. Что с этим делать, решает
+   страница — воркер только сообщает:
+     updated       — файл содержимого на сервере оказался другим (в кеше он уже новый);
+     shell-updated — обновилась сама читалка.
+   Текст под читающим молча не подменяем: абзац, уехавший из-под глаз, хуже вчерашней
+   опечатки. Предлагаем — и читатель сам решает, когда. */
+let reloadOffered = false;
+function offerReload(текст, кнопка) {
+  if (reloadOffered) return;      // обновилось десять глав разом — предложение одно
+  reloadOffered = true;
+  toast(текст, { label: кнопка, run: reloadKeepingPlace });
+  setTimeout(() => { reloadOffered = false; }, 15000);
+}
+
+/* Перезагрузка, после которой читатель остаётся там, где читал. Место чтения лежит в
+   настройках, но адрес сильнее: придя по чужой ссылке (?book=…&c=3&s=s040) и дочитав до
+   седьмой главы, после перезагрузки читатель оказался бы снова в третьей. Поэтому сперва
+   дописываем место (оно сохраняется с задержкой), потом оставляем в адресе одну запись. */
+function reloadKeepingPlace() {
+  try { saveSettings(); } catch { /* не вышло — перезагрузим как есть */ }
+  if (bookId) history.replaceState({}, '', '?book=' + encodeURIComponent(bookId));
+  location.reload();
+}
+
+function onSwMessage(msg) {
+  if (!msg || typeof msg !== 'object') return;
+  if (msg.type === 'shell-updated') { offerReload('Читалка обновилась', 'Обновить'); return; }
+  if (msg.type !== 'updated' || typeof msg.url !== 'string') return;
+  // реестр или дерево разделов: полку пересобираем сами, спрашивать тут не о чем
+  if (/\/books\/(index|taxonomy)\.json$/.test(msg.url)) { reloadRegistry(); return; }
+  if (/\/books-private\/index\.json$/.test(msg.url)) {
+    refreshLibrary().then(изменилась => { if (изменилась) onLibraryChanged(); });
+    return;
+  }
+  // поисковый файл: выбрасываем из памяти — следующий поиск возьмёт свежий
+  if (/\/search\.json$/.test(msg.url)) {
+    for (const e of library) {
+      if (new URL(searchBase(e) + 'search.json', location.href).href === msg.url) searchBooks.delete(e.id);
+    }
+    return;
+  }
+  if (!book || privateBook) return;
+  const корень = new URL(base, location.href).href;
+  if (!msg.url.startsWith(корень)) return;
+  // адрес приходит закодированным: «маджлис-2.md» в нём — «%D0%BC%D0%B0…», а в book.json — буквами
+  let файл = msg.url.slice(корень.length);
+  try { файл = decodeURIComponent(файл); } catch { /* оставим как пришло */ }
+  if (файл === 'book.json') { offerReload('Текст обновился', 'Показать'); return; }
+  const m = файл.match(/^([^/]+)\/(.+\.md)$/);   // <язык>/<глава>.md; обложки и картинки — не текст
+  if (!m || !book.languages.includes(m[1])) return;
+  const ci = book.chapters.findIndex(ch => ch.file === m[2]);
+  if (ci < 0) return;
+  const ключ = bookId + '/' + m[2];
+  if (inStream().includes(ci)) {
+    staleChapters.add(ключ);       // на экране прежний текст: не покажут сейчас — возьмём заново при заходе
+    offerReload('Текст обновился', 'Показать');
+  } else {
+    chapterCache.delete(ключ);     // глава не на экране — перечитаем, когда откроют
+  }
+}
+
 if ('serviceWorker' in navigator) {
+  // о новой версии читалки воркер говорит сам (shell-updated) — и только когда на экране
+  // действительно прежняя оболочка; по смене воркера об этом судить нельзя
+  navigator.serviceWorker.addEventListener('message', e => onSwMessage(e.data));
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('sw.js').catch(err => console.warn('SW не зарегистрирован:', err));
   });

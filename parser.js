@@ -839,8 +839,82 @@ function glossPrompt(html, lang) {
   return glossPromptHead(lang) + '\n\n' + glossSectorBlock(html, null);
 }
 
+/* ===== поисковый файл книги (books/<id>/search.json) =====
+ *
+ * Поиск по библиотеке раньше скачивал все главы всех книг и разбирал их на месте: ~240
+ * запросов и два десятка секунд на первом поиске (и хостинг, принявший такую очередь за
+ * атаку, закрывал читателю адрес). Теперь у книги есть один файл с уже разобранным текстом:
+ * его собирает tools/gen-search.js при публикации, читалка берёт его одним запросом.
+ *
+ * Сборка — здесь, а не в инструменте, по той же причине, что и нумерация слов подстрочника:
+ * файл и читалка обязаны видеть ОДНУ И ТУ ЖЕ строку. По смещениям в ней поиск красит
+ * найденное в отрисованной главе; разойдись строки на знак — подсветка съедет. Читалка без
+ * поискового файла (книга опубликована мимо инструмента) собирает то же самое этим же кодом.
+ *
+ * Формат: { v: 1, langs: [...], rtl: [...], ch: [{ i, t, p }] }
+ *   i — номер главы в book.json.chapters, t — её название для выдачи,
+ *   p — строки: [id сектора, текст на langs[0], текст на langs[1], …]; нет текста — null.
+ * Сноски идут своими строками (они пер-язычные): [«fn3», null, «текст»].
+ * Инструмент дописывает ещё `c` — число глав и слов (как `counts` в реестре): по нему
+ * читалка узнаёт файл, отставший от текста.
+ */
+
+/* HTML сектора → текст, каким его отдаёт DOM (`textContent`): теги убраны без следа,
+   сущности развёрнуты. Набор сущностей закрытый — ровно тот, что пишет escapeHtml: другой
+   разметки в секторе нет, её вся делает этот файл. Тег вырезается с оглядкой на кавычки:
+   в значении атрибута может стоять «>». */
+function htmlPlain(html) {
+  return String(html || '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<(?:[^>"']|"[^"]*"|'[^']*')*>/g, '')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&');   // &amp; последним: иначе «&amp;lt;» развернулось бы дважды
+}
+
+/** Пары главы → строки поискового файла. Пара без текста ни на одном языке не пишется. */
+function searchRows(pairs, langs) {
+  const rows = [];
+  for (const pair of pairs) {
+    const row = [pair.id];
+    let есть = false;
+    for (const lang of langs) {
+      const t = pair[lang] == null ? null : htmlPlain(pair[lang]);
+      row.push(t || null);
+      if (t) есть = true;
+    }
+    if (есть) rows.push(row);
+  }
+  return rows;
+}
+
+/** Название главы для выдачи поиска. */
+function searchChapterTitle(manifest, ci) {
+  const t = (manifest.chapters[ci] || {}).title || {};
+  return t.ru || Object.values(t).find(Boolean) || `Глава ${ci + 1}`;
+}
+
+/**
+ * Поисковый файл книги. `texts` — { "<файл главы>": { "<язык>": "<markdown>" } };
+ * главы без файла (заголовки частей) и главы, которых нет в `texts`, пропускаются.
+ */
+function searchIndex(manifest, texts) {
+  const langs = Array.isArray(manifest.languages) ? manifest.languages : [];
+  const ch = [];
+  (manifest.chapters || []).forEach((гл, i) => {
+    if (!гл || !гл.file || !texts[гл.file]) return;
+    const по = {};
+    for (const lang of langs) по[lang] = texts[гл.file][lang] || '';
+    const p = searchRows(buildChapter(по, langs).pairs, langs);
+    if (p.length) ch.push({ i, t: searchChapterTitle(manifest, i), p });
+  });
+  return { v: 1, langs, rtl: Array.isArray(manifest.rtl) ? manifest.rtl : [], ch };
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
+    htmlPlain, searchRows, searchChapterTitle, searchIndex,
     parseFile, buildChapter, renderGroup, inlineMd, escapeHtml, sharhKey, glossaryAnchor,
     GLOSS_SKIP_TAGS, GLOSS_CLASSES, glossPlainText, glossWords, glossTokens,
     glossHash, glossNormalizeBase, parseGlossFile,

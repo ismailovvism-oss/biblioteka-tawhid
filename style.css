@@ -2062,3 +2062,77 @@ body:not([data-view="reading"]) #btn-comic { display: none; }
 }
 .art-end { margin-top: 2.6rem; align-items: center; }
 .art-end .ch-end-prev { align-self: center; color: var(--accent); }
+
+/* ===== скорость на ощупь (15.11.2026) ===== */
+
+/* Отклик на нажатие. Палец должен увидеть, что кнопка нажата, раньше, чем придёт результат:
+   между касанием и новой страницей иначе нет ничего, и нажатие кажется несработавшим.
+   Серую системную вспышку под пальцем убираем — вместо неё свои состояния :active. */
+button, a, summary, select, label, [role="tab"] {
+  touch-action: manipulation;                 /* без ожидания второго касания (двойной тап) */
+}
+/* системную вспышку убираем только там, где есть своя замена: у кнопок это общий
+   button:active, у карточек — правила ниже. Ссылкам сносок, заголовкам сворачиваемых
+   врезок и подписям полей вспышку оставляем — другого отклика у них нет */
+button, [role="tab"] { -webkit-tap-highlight-color: transparent; }
+.cover, .art-card, .book-row, .spine, .continue-line, .search-item,
+.kind-tab, .chip, .crumb, .shelf-filter, .shelf-qbtn, .vs-btn {
+  transition: transform 90ms ease-out, opacity 90ms ease-out;
+}
+/* у обложки и карточки фон — картинка: подкраску фона под ней не видно, поэтому чуть
+   вдавливаем саму карточку */
+.cover:active, .art-card:active, .book-row:active, .spine:active,
+.continue-line:active, .search-item:active { transform: scale(0.975); opacity: 0.85; }
+.kind-tab:active, .chip:active, .crumb:active, .shelf-filter:active,
+.shelf-qbtn:active, .vs-btn:active { transform: scale(0.96); }
+@media (prefers-reduced-motion: reduce) {
+  .cover:active, .art-card:active, .book-row:active, .spine:active, .continue-line:active,
+  .search-item:active, .kind-tab:active, .chip:active, .crumb:active, .shelf-filter:active,
+  .shelf-qbtn:active, .vs-btn:active { transform: none; }
+}
+
+/* Ход загрузки: тонкая полоса у верхнего края, пока ждём сеть дольше четверти секунды
+   (ставит app.js, fetchText). Сохранённое на устройстве приходит мгновенно и полосы не
+   показывает — она появляется ровно тогда, когда ждать действительно приходится. */
+body[data-busy]::after {
+  content: '';
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  z-index: 70;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent) no-repeat;
+  background-size: 40% 100%;
+  animation: busy-run 1.1s linear infinite;
+}
+@keyframes busy-run {
+  from { background-position: -70% 0; }
+  to { background-position: 170% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  body[data-busy]::after { animation: none; background: var(--accent); opacity: 0.55; }
+}
+
+/* Сообщение с кнопкой («Текст обновился · Показать»). */
+.toast.has-action {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.35rem 0.4rem 0.35rem 1.1rem;
+  max-width: calc(100vw - 2rem);
+  white-space: nowrap;
+}
+.toast.has-action button {
+  padding: 0.3rem 0.9rem;
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--fg);
+  font-weight: bold;
+}
+/* сообщение обязано быть видно поверх всего, включая комикс (z-index 2500): под оверлеем
+   «Текст обновился» прошло бы незамеченным */
+.toast { z-index: 3000; }
+
+/* поиск: книги, которые не загрузились */
+.search-note { margin: 0.2rem 0 0.5rem; color: var(--muted); font-size: 0.85rem; }
+.search-note button { padding: 0.1rem 0.5rem; text-decoration: underline; color: var(--accent); }
