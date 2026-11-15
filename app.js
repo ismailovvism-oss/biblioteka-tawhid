@@ -633,7 +633,7 @@ function articleEnd() {
   b.type = 'button';
   b.className = 'ch-end-prev';
   b.textContent = '← Все статьи';
-  b.addEventListener('click', () => { history.pushState({}, '', location.pathname); renderLibrary(); });
+  b.addEventListener('click', () => { navPush(location.pathname); renderLibrary(); });
   nav.append(end, b);
   return nav;
 }
@@ -2952,7 +2952,7 @@ async function showSharh(title, tab) {
         saveSettings();
       }
       if (overlayMark && !anyPopupOpen()) { overlayMark = false; history.replaceState({}, '', url); }
-      else history.pushState({}, '', url);
+      else navPush(url);
       openBook(sb.entry, { chapter: ci });
     };
   } catch (err) {
@@ -4032,7 +4032,7 @@ let suppressPop = false;   // свой history.back() при закрытии и
 function openOverlay(el) {
   restoreOwn(el);   // чужое (автозаполнение без события) — прочь, см. guardAutofill
   el.hidden = false;
-  if (!overlayMark) { overlayMark = true; history.pushState({ overlay: true }, ''); }
+  if (!overlayMark) { overlayMark = true; flushShelfUrl(); history.pushState({ overlay: true }, ''); }
 }
 // вызвать после закрытия панели из UI (Esc, тап мимо, выбор пункта) — убрать маркер
 let backDone = null;       // обещание: наш history.back() отработал (popstate пришёл)
@@ -4416,6 +4416,7 @@ function оценить(норм, запрос) {
 }
 
 let searchSeq = 0;
+let searchOpened = { q: '', groups: new Set() };   // какие группы названий раскрыты («Ещё N») по этому запросу
 let pendingHit = null; // { ci, id, lang, start, end } — подсветить после перехода
 
 function jumpToHit(r) {
@@ -4427,7 +4428,7 @@ function jumpToHit(r) {
       // адрес кладём ПОСЛЕ того, как отработает шаг назад от закрытой панели поиска: иначе
       // этот шаг съедал только что положенный адрес, и в строке оставалась полка
       settleBack().then(() => {
-        history.pushState({}, '', '?book=' + encodeURIComponent(entry.id));
+        navPush('?book=' + encodeURIComponent(entry.id));
         openBook(entry, { hit: r });
       });
       return;
@@ -4695,6 +4696,42 @@ function scanBooks(entries, books, запрос) {
   return { results, capped };
 }
 
+/* Один поиск: сначала названия, потом текст. Ищут обычно вещь («книга про намаз»), а не
+   место в тексте, и прежде запись с этим словом в названии тонула под сотней совпадений из
+   чужих глав — или не находилась вовсе: по названиям искало только поле на полке.
+   Записи — по названию, автору, темам и аннотации (то же, что ищет полка); сверху те, у кого
+   запрос в самом названии. Главы и разделы — по названию. */
+/* Слово из одной-двух букв засчитываем только целиком, как и в тексте (`подходит`): частью
+   слова «на» или «ра» нашлись бы почти в каждой записи, и названия вытеснили бы саму выдачу. */
+const словаВ = строка => new Set(строка.match(СЛОВО) || []);
+const всеСлова = (запрос, строка, слова) => запрос.every(с => (с.length >= 3 ? строка.includes(с) : слова.has(с)));
+const haystackWords = new WeakMap();
+function titleHits(запрос) {
+  const слова = e => { let w = haystackWords.get(e); if (!w) haystackWords.set(e, w = словаВ(entryHaystack(e))); return w; };
+  const вНазвании = e => { const t = normalize(Object.values(e.title || {}).filter(Boolean).join(' ')); return всеСлова(запрос, t, словаВ(t)); };
+  const подходят = library.filter(e => всеСлова(запрос, entryHaystack(e), слова(e)));
+  return подходят.sort((a, b) => (вНазвании(a) ? 0 : 1) - (вНазвании(b) ? 0 : 1));   // сортировка устойчивая: дальше — как в реестре
+}
+function chapterHits(entries, books, запрос) {
+  const out = [];
+  for (let k = 0; k < entries.length; k++) {
+    const d = books[k];
+    if (!d) continue;
+    for (const гл of d.ch) {
+      if (!гл.t) continue;
+      if (гл.nt === undefined) { гл.nt = normalize(гл.t); гл.nw = словаВ(гл.nt); }   // один раз на главу, как и текст
+      if (всеСлова(запрос, гл.nt, гл.nw)) out.push({ entry: entries[k], ci: гл.i, title: гл.t });
+    }
+  }
+  return out;
+}
+// закрыть окно поиска и сделать переход, когда отработает шаг назад от закрытой панели (см. jumpToHit)
+function leaveSearchThen(дальше) {
+  $('#search').hidden = true;
+  consumeOverlayMark();
+  settleBack().then(дальше);
+}
+
 async function runSearch(raw) {
   const seq = ++searchSeq;   // любой новый вызов отменяет идущий — и тот, что кончится на «мало букв»
   const норма = normalize(raw).trim();
@@ -4705,6 +4742,11 @@ async function runSearch(raw) {
   const entries = searchEntries();
   const books = new Array(entries.length);   // пусто — ещё едет
   let приехало = 0, скоро = null;
+  // выдача перерисовывается по мере прихода книг — раскрытое читателем остаётся раскрытым, пока запрос тот же
+  const гдеИщем = норма + '|' + (libraryScope ? '' : bookId);   // тот же запрос в другой книге — другая выдача
+  if (searchOpened.q !== гдеИщем) searchOpened = { q: гдеИщем, groups: new Set() };
+  // названия записей известны сразу, из реестра: их показываем, не дожидаясь текстов
+  const записи = libraryScope ? titleHits(запрос) : [];
 
   const показать = () => {
     скоро = null;
@@ -4712,7 +4754,8 @@ async function runSearch(raw) {
     const { results, capped } = scanBooks(entries, books, запрос);
     renderResults(results.slice(0, SEARCH_CAP), raw.trim(), libraryScope,
                   capped || results.length > SEARCH_CAP, results.length,
-                  { ждём: entries.length - приехало, всего: entries.length, сбой: books.filter(b => b === null).length });
+                  { ждём: entries.length - приехало, всего: entries.length, сбой: books.filter(b => b === null).length },
+                  { записи, главы: chapterHits(entries, books, запрос) });
   };
   /* Выдачу показываем по мере прихода книг, но не чаще, чем раз в 200 мс: когда всё уже в
      памяти, книги «приезжают» разом, и перерисовка на каждую была бы лишней работой. Первый
@@ -4737,11 +4780,14 @@ function retrySearch() {
 
 /* `ход` = { ждём, всего, сбой }: сколько книг ещё едет и сколько не загрузилось. Пока книги
    едут, «ничего не найдено» говорить рано; а если часть не загрузилась, честный ответ —
-   «в них не искали», а не «там этого нет». */
-function renderResults(results, label, libraryScope, capped, всего = results.length, ход = {}) {
+   «в них не искали», а не «там этого нет».
+   `вверху` = { записи, главы } — совпадения по названиям: они стоят перед текстом. */
+const SEARCH_TOP_ENTRIES = 5, SEARCH_TOP_CHAPTERS = 6;   // сколько названий видно сразу; остальное — по «Ещё»
+function renderResults(results, label, libraryScope, capped, всего = results.length, ход = {}, вверху = {}) {
   const box = $('#search-results');
   box.innerHTML = '';
   const { ждём = 0, сбой = 0 } = ход;
+  const { записи = [], главы = [] } = вверху;
   const добавитьСбой = () => {
     if (!сбой || ждём) return;
     const d = document.createElement('div');
@@ -4754,17 +4800,96 @@ function renderResults(results, label, libraryScope, capped, всего = result
     d.appendChild(b);
     box.appendChild(d);
   };
+  const заголовок = текст => {
+    const h = document.createElement('div');
+    h.className = 'search-count';
+    h.textContent = текст;
+    box.appendChild(h);
+    return h;
+  };
+  // группа названий: первые `видно` строк, остальные — по кнопке «Ещё N»
+  const раскрыто = searchOpened.groups;
+  const группа = (что, список, видно, строка) => {
+    if (!список.length) return;
+    заголовок(`${что}: ${список.length}`);
+    const прятать = список.length > видно && !раскрыто.has(что);
+    список.forEach((x, n) => {
+      const item = строка(x);
+      if (прятать && n >= видно) item.hidden = true;
+      box.appendChild(item);
+    });
+    if (прятать) {
+      const ещё = document.createElement('button');
+      ещё.type = 'button';
+      ещё.className = 'search-more';
+      ещё.textContent = `Ещё ${список.length - видно}`;
+      const свои = [...box.children].slice(-(список.length - видно));
+      ещё.addEventListener('click', () => { раскрыто.add(что); for (const el of свои) el.hidden = false; ещё.remove(); });
+      box.appendChild(ещё);
+    }
+  };
+
+  группа('Книги и статьи', записи, SEARCH_TOP_ENTRIES, e => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'search-item search-entry';
+    const thumb = document.createElement('span');
+    thumb.className = 'search-thumb';
+    coverInto(thumb, e, '');
+    const main = document.createElement('span');
+    main.className = 'search-entry-main';
+    const title = document.createElement('span');
+    title.className = 'search-entry-title';
+    title.dir = 'auto';
+    setTextSlw(title, entryLabel(e));
+    const meta = document.createElement('span');
+    meta.className = 'search-meta';
+    const автор = Array.isArray(e.authors) ? e.authors.filter(Boolean).join(', ') : '';
+    meta.textContent = [kindLabel(e), автор].filter(Boolean).join(' · ') + (e.draft ? ' · в разработке' : '');
+    main.append(title, meta);
+    item.append(thumb, main);
+    item.addEventListener('click', () => leaveSearchThen(() => openEntry(e)));
+    return item;
+  });
+
+  группа(libraryScope ? 'Главы и разделы' : (bookEntry && kindOf(bookEntry) === 'article' ? 'Разделы' : 'Главы'),
+    главы, SEARCH_TOP_CHAPTERS, г => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'search-item search-chapter';
+      if (libraryScope) {
+        const meta = document.createElement('span');
+        meta.className = 'search-meta';
+        const тип = document.createElement('span'); тип.className = 'kind-tag'; тип.textContent = kindLabel(г.entry);
+        meta.append(entryLabel(г.entry), ' ', тип);
+        item.appendChild(meta);
+      }
+      const t = document.createElement('span');
+      t.className = 'search-chapter-title';
+      t.dir = 'auto';
+      setTextSlw(t, г.title);
+      item.appendChild(t);
+      item.addEventListener('click', () => leaveSearchThen(() => {
+        if (г.entry.id === bookId && book) { loadChapter(г.ci); return; }
+        navPush('?book=' + encodeURIComponent(г.entry.id));
+        openBook(г.entry, { chapter: г.ci });
+      }));
+      return item;
+    });
+
+  const естьНазвания = записи.length + главы.length > 0;
   if (!results.length) {
-    box.textContent = ждём ? `Ищу… ${ход.всего - ждём} из ${ход.всего}` : `Ничего не найдено: «${label}».`;
+    const пусто = document.createElement('div');
+    пусто.className = естьНазвания ? 'search-count' : 'search-empty';
+    пусто.textContent = ждём ? `Ищу в тексте… ${ход.всего - ждём} из ${ход.всего}`
+      : естьНазвания ? 'В тексте не нашлось.' : `Ничего не найдено: «${label}».`;
+    box.appendChild(пусто);
     добавитьСбой();
     return;
   }
-  const head = document.createElement('div');
-  head.className = 'search-count';
-  head.textContent = `Найдено: ${всего}${capped ? '+' : ''}`
+  заголовок(`В тексте: ${всего}${capped ? '+' : ''}`
     + (всего > results.length ? ` · показаны ${results.length} самых точных` : '')
-    + (ждём ? ` · ищу ещё в ${ждём} из ${ход.всего}…` : '');
-  box.appendChild(head);
+    + (ждём ? ` · ищу ещё в ${ждём} из ${ход.всего}…` : ''));
   добавитьСбой();
   for (const r of results) {
     const item = document.createElement('button');
@@ -4797,16 +4922,20 @@ function renderResults(results, label, libraryScope, capped, всего = result
   }
 }
 
-$('#btn-search').addEventListener('click', () => {
+/* Открыть окно поиска. `запрос` — сразу искать его (переход с полки: «искать в тексте»). */
+function openSearch(запрос) {
   // в книге — по умолчанию по книге (с переключателем); в библиотеке — по всей
   const bookChip = $('#search-scope').querySelector('[data-scope="book"]');
   bookChip.disabled = !bookId;
   bookChip.classList.toggle('chip-off', !bookId);
   bookChip.textContent = bookId && kindOf(bookEntry) === 'article' ? 'Эта статья' : 'Эта книга';
   setSearchScope(bookId ? 'book' : 'library');
+  if (typeof запрос === 'string') $('#search-input').value = запрос;
   openOverlay($('#search'));
   $('#search-input').focus();
-});
+  if (typeof запрос === 'string' && normalize(запрос).trim().length >= 2) runSearch(запрос);
+}
+$('#btn-search').addEventListener('click', () => openSearch());
 $('#search-scope').querySelectorAll('.chip').forEach(c => c.addEventListener('click', () => {
   if (c.dataset.scope === 'book' && !bookId) return;
   setSearchScope(c.dataset.scope);
@@ -5198,14 +5327,14 @@ function hashId(s) {
   for (const ch of String(s)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
   return h >>> 0;
 }
-function openInfoFor(e) { history.pushState({}, '', '?info=' + encodeURIComponent(e.id)); renderBookInfo(e); }
+function openInfoFor(e) { navPush('?info=' + encodeURIComponent(e.id)); renderBookInfo(e); }
 /* Открыть запись с полки. Книга — через карточку (обложка, аннотация, «Читать»). Статья —
    сразу в текст: то, что показала бы карточка, стоит в шапке самой статьи, а лишний экран
    перед чтением на один присест только мешает. Статья-черновик (`draft`) текста не имеет —
    ей остаётся карточка. */
 function openEntry(e) {
   if (kindOf(e) !== 'article' || e.draft) { openInfoFor(e); return; }
-  history.pushState({}, '', '?book=' + encodeURIComponent(e.id));
+  navPush('?book=' + encodeURIComponent(e.id));
   openBook(e);
 }
 // цвет корешка: hue рода + светлота от оттенка подкатегории (без хэша)
@@ -5532,10 +5661,16 @@ let onShelf = false;       // на экране полка — не книга �
 let shelfDrawn = 0;        // сколько записей сейчас отрисовано (досыпка идёт порциями)
 let shelfReturn = null;    // { y, n, sig }
 const SHELF_RESTORE_MAX = 600;   // больше разом не рисуем даже ради возврата (см. про 3000 книг ниже)
-const shelfSig = () => JSON.stringify([shelfKind(), settings.shelfCat, settings.shelfFacets, shelfQuery, shelfSort(), settings.shelfView, shelfStatus, shelfLen]);
+/* Фильтры в слепке — в каноническом виде (порядок групп как в FACETS, пустые группы прочь):
+   состояние полки собирается и из адреса (applyShelfUrl), и тот же отбор, записанный в
+   settings в другом порядке или с пустой группой от снятого фильтра, иначе считался бы
+   другим списком — и возврат из книги терял место. */
+const facetsCanon = () => { const f = settings.shelfFacets || {}; return FACETS.map(x => [x.key, f[x.key] || []]).filter(([, v]) => v.length); };
+const shelfSig = () => JSON.stringify([shelfKind(), settings.shelfCat, facetsCanon(), shelfQuery, shelfSort(), settings.shelfView, shelfStatus, shelfLen]);
 function leaveShelf() {
   if (onShelf) shelfReturn = { y: window.scrollY, n: shelfDrawn, sig: shelfSig() };
   onShelf = false;
+  wantedMiss = null;   // сам открыл другую запись — ту, что была в адресе, больше не ждём (retryWanted)
 }
 
 function renderBookList(shown, view, host, минимум = 0) {
@@ -5607,6 +5742,109 @@ function renderBookList(shown, view, host, минимум = 0) {
   pump(Math.max(SHELF_CHUNK, Math.min(минимум, SHELF_RESTORE_MAX)));
 }
 
+/* ===== адрес полки: вкладка, раздел и отбор — в адресной строке (SPEC 5.9) =====
+   ?tab=articles&cat=fiqh-ibadat&read=none&tags=намаз&q=фатиха
+   Зачем: ссылку на «Фикх, непрочитанное» можно сохранить в закладки или отправить, и она
+   откроет тот же список. Раньше у полки был один адрес на всё.
+   Правила:
+   — пишем в адрес только то, что отличается от обычного: «Книги» без отбора — чистый адрес;
+   — есть хоть один параметр полки — адрес задаёт её целиком, а чего в нём нет, то обычное
+     (вкладка «Книги», без раздела и отбора). Иначе ссылка «Фикх» открылась бы у другого
+     человека с его фильтрами;
+   — чистый адрес при запуске — «полка, какой её оставили» (вкладка, раздел и фильтры лежат
+     в settings; адрес запуска у установленной читалки всегда чистый). А на шаге по истории
+     чистый адрес — «полка без отбора»: адрес каждой записи истории держим в актуальном виде
+     (writeShelfUrl), и чистым он остаётся, только если отбора на ней не было;
+   — порядок и вид списка в адрес не идут: это привычка читателя, а не отбор;
+   — раздел — по id узла taxonomy.json, а не по названию: названия правятся;
+   — адрес меняем через replaceState: отбор — не переход, и «назад» с полки не должен
+     ходить по каждому нажатому чипу. */
+const SHELF_READ = ['none', 'reading', 'done'], SHELF_LEN = ['short', 'long'];
+const shelfParams = () => ['tab', 'cat', 'q', 'read', 'len', ...FACETS.map(f => f.key)];
+function catIdOf(path) {
+  if (!path.length) return null;
+  for (const n of taxNodes) {
+    const p = catPathNames(n.id);
+    if (p.length === path.length && p.every((seg, i) => seg === path[i])) return n.id;
+  }
+  return null;
+}
+function shelfUrl() {
+  const вид = shelfKind();
+  const p = new URLSearchParams();
+  const id = catIdOf(Array.isArray(settings.shelfCat) ? settings.shelfCat : []);
+  if (id) p.set('cat', id);
+  if (shelfStatus !== 'all') p.set('read', shelfStatus);
+  if (shelfLen !== 'any') p.set('len', shelfLen);
+  for (const [key, vals] of facetsCanon()) for (const v of vals) p.append(key, v);
+  if (shelfQuery) p.set('q', shelfQuery);
+  // вкладку называем, когда она не «Книги» или когда в адресе уже есть отбор: ссылка
+  // должна открывать тот же список, а не тот же отбор на чужой вкладке
+  const s = p.toString();
+  const tab = вид !== 'book' || s ? 'tab=' + (вид === 'article' ? 'articles' : 'books') : '';
+  return location.pathname + (tab || s ? '?' + [tab, s].filter(Boolean).join('&') : '');
+}
+// состояние полки из адреса; false — адрес чистый, и полка остаётся какой была (запуск)
+function applyShelfUrl(params, изИстории = false) {
+  if (!изИстории && !shelfParams().some(k => params.has(k))) return false;
+  settings.shelfKind = params.get('tab') === 'articles' ? 'article' : 'book';
+  const cat = params.get('cat');
+  const свой = Array.isArray(settings.shelfCat) ? settings.shelfCat : [];
+  if (cat && taxById.has(cat)) settings.shelfCat = catPathNames(cat);
+  // раздел, которого нет в дереве (переименовали, или дерево не загрузилось), адресом не
+  // выразить: в адресе его нет не потому, что его сняли, — оставляем как есть
+  else if (!(свой.length && !catIdOf(свой))) settings.shelfCat = [];
+  const facets = {};
+  for (const f of FACETS) {
+    const vals = [...new Set(params.getAll(f.key).filter(Boolean))].slice(0, 30);
+    if (vals.length) facets[f.key] = vals;
+  }
+  settings.shelfFacets = facets;
+  shelfQuery = (params.get('q') || '').trim().slice(0, 200);
+  shelfStatus = SHELF_READ.includes(params.get('read')) ? params.get('read') : 'all';
+  const вид = shelfKind();
+  shelfLen = вид === 'article' && SHELF_LEN.includes(params.get('len')) ? params.get('len') : 'any';
+  shelfChipsOf = вид;   // чипы пришли из адреса для этой вкладки — renderLibrary их не сбросит
+  saveSettings();
+  return true;
+}
+/* Записать состояние полки в адрес текущей записи истории. Поверх полки может лежать маркер
+   открытой панели (openOverlay) — тогда пишем в него, а когда маркер уйдёт, popstate позовёт
+   нас ещё раз: иначе под маркером остался бы адрес до правки. */
+let shelfUrlTimer = null;
+function writeShelfUrl() {
+  clearTimeout(shelfUrlTimer);
+  shelfUrlTimer = null;
+  if (!onShelf) return;
+  // на полке оказались вместо записи из адреса (её ещё нет в реестре) — адрес нужен retryWanted;
+  // а если в адресе её уже нет (ушли «домой»), ждать больше нечего
+  if (wantedMiss) {
+    const сейчас = new URLSearchParams(location.search);
+    if (сейчас.get('book') === wantedMiss || сейчас.get('info') === wantedMiss) return;
+    wantedMiss = null;
+  }
+  const url = shelfUrl();
+  if (url === location.pathname + location.search) return;
+  // Safari разрешает менять адрес не чаще ста раз за полминуты и бросает ошибку — допишем чуть позже
+  try { history.replaceState(history.state, '', url); }
+  catch { shelfUrlTimer = setTimeout(writeShelfUrl, 3000); }
+}
+/* Из paint адрес пишем с задержкой. Набор запроса перерисовывает список на каждую паузу, и
+   адрес менялся бы несколько раз в секунду — так упираются в лимит Safari, а отказавшая
+   запись оставляет в истории устаревший адрес: «назад» из книги вернул бы полку со старым
+   запросом. С задержкой в 400 мс правок не больше двух-трёх в секунду. */
+function writeShelfUrlSoon() {
+  clearTimeout(shelfUrlTimer);
+  shelfUrlTimer = setTimeout(writeShelfUrl, 400);
+}
+// перед новым шагом истории отложенное дописываем сразу: адрес должен лечь в запись полки, а не в следующую
+function flushShelfUrl() { if (shelfUrlTimer) writeShelfUrl(); }
+/* Все переходы (книга, карточка, «домой») кладут шаг истории через эту функцию. */
+function navPush(url) {
+  flushShelfUrl();
+  history.pushState({}, '', url);
+}
+
 /* `opts.keep` — перерисовать полку на месте, не дёргая прокрутку (обновился реестр). */
 function renderLibrary(opts = {}) {
   let вернуть = null;
@@ -5625,7 +5863,7 @@ function renderLibrary(opts = {}) {
   $('#chapter-title').textContent = library.length ? 'Библиотека Таухид' : 'Список книг пуст';
   stream.innerHTML = '';
 
-  const open = e => () => { history.pushState({}, '', '?book=' + encodeURIComponent(e.id)); openBook(e); };
+  const open = e => () => { navPush('?book=' + encodeURIComponent(e.id)); openBook(e); };
 
   renderTree(); // боковое дерево навигации (в #cat-tree)
 
@@ -5861,6 +6099,18 @@ function renderLibrary(opts = {}) {
       b.addEventListener('click', () => { settings.shelfKind = k.id; saveSettings(); renderLibrary(); });
       body.appendChild(b);
     }
+    /* Поле на полке ищет по названиям, авторам и темам — ответ мгновенный. А нужное слово
+       могло быть в самом тексте: тот же запрос в одно касание уходит в общий поиск. Над
+       списком — чтобы было видно всегда; под «ничего не нашлось» — как следующий шаг. */
+    let вТексте = null;
+    if (normalize(shelfQuery).trim().length >= 2) {
+      вТексте = document.createElement('button');
+      вТексте.type = 'button';
+      вТексте.className = 'shelf-other shelf-intext';
+      вТексте.textContent = `Искать «${shelfQuery}» в тексте книг и статей ›`;
+      вТексте.addEventListener('click', () => openSearch(shelfQuery));
+      if (shown.length) body.appendChild(вТексте);
+    }
     // «Начните отсюда» — только над полным списком: под отбором и поиском оно мешало бы
     if (!shelfQuery && shelfStatus === 'all' && shelfLen === 'any' && !activeFilterCount()) {
       const закреп = underCat.filter(e => e.pinned)
@@ -5870,11 +6120,13 @@ function renderLibrary(opts = {}) {
     if (!shown.length) {
       const m = document.createElement('div');
       m.className = 'shelf-empty';
-      m.textContent = shelfQuery ? `Ничего не нашлось по запросу «${shelfQuery}».` : `По выбранным фильтрам ${kindMeta(вид).gen} нет.`;
+      m.textContent = shelfQuery ? `По названиям, авторам и темам ничего не нашлось: «${shelfQuery}».` : `По выбранным фильтрам ${kindMeta(вид).gen} нет.`;
       body.appendChild(m);
+      if (вТексте) body.appendChild(вТексте);
     } else {
       renderBookList(shown, view, body, typeof минимум === 'number' ? минимум : 0);
     }
+    writeShelfUrlSoon();   // запрос и чипы меняют только список — адрес обновляем здесь же
   };
 
   sort.addEventListener('change', () => {
@@ -5939,6 +6191,65 @@ function renderLibrary(opts = {}) {
   if (вернуть) window.scrollTo({ top: вернуть.y, behavior: 'instant' });
   else window.scrollTo(0, 0);
   onShelf = true;
+  writeShelfUrl();
+}
+
+/* Оглавление на карточке книги. Раньше карточка говорила «глав: 37» и вела только в
+   начало или к месту, где остановились: чтобы попасть в нужную главу, книгу надо было
+   открыть, найти значок оглавления и выбрать главу там. Теперь из чего книга состоит —
+   видно сразу, и в главу один шаг. Дерево — по `level`, записи-группы (без файла) стоят
+   подзаголовками. Длинный список свёрнут, но не тогда, когда читатель остановился в
+   скрытой части: глава с пометкой «вы здесь» должна быть на виду.
+   `перейти(i)` — открыть главу; null — читать нельзя (черновик), строки не нажимаются. */
+const BI_TOC_FOLD = 12;
+function bookInfoToc(entry, manifest, перейти) {
+  const главы = Array.isArray(manifest && manifest.chapters) ? manifest.chapters : [];
+  // у черновика текста ещё нет, и файлов у глав может не быть: там глава — всё, что не подзаголовок
+  const глава = ch => (entry.draft ? !!ch && !ch.header : chHasFile(ch));
+  const читаемых = главы.filter(глава).length;
+  if (читаемых < 2) return null;
+  const l = getLast(entry.id);
+  const тут = l && Number.isInteger(l.chapter) && глава(главы[l.chapter]) && stateOf(l) !== 'none' ? l.chapter : -1;
+  const box = document.createElement('nav');
+  box.className = 'bi-toc';
+  box.setAttribute('aria-label', 'Оглавление');
+  const h = document.createElement('div');
+  h.className = 'bi-toc-h';
+  // карточка бывает и у статьи (черновик): у неё не главы, а разделы
+  h.textContent = `Оглавление · ${читаемых} ` + (kindOf(entry) === 'article'
+    ? plural(читаемых, 'раздел', 'раздела', 'разделов') : plural(читаемых, 'глава', 'главы', 'глав'));
+  box.appendChild(h);
+  главы.forEach((ch, i) => {
+    const файл = глава(ch);
+    const row = document.createElement(файл && перейти ? 'button' : 'div');
+    if (файл && перейти) row.type = 'button';
+    row.className = (файл ? 'bi-toc-item' : 'bi-toc-group') + (i === тут ? ' current' : '') + (i >= BI_TOC_FOLD ? ' extra' : '');
+    row.style.paddingInlineStart = (0.1 + chLevel(ch) * 0.9) + 'rem';
+    const t = document.createElement('span');
+    t.className = 'bi-toc-title';
+    t.dir = 'auto';
+    setTextSlw(t, plainOf(ch && ch.title));
+    row.appendChild(t);
+    if (i === тут) {
+      const здесь = document.createElement('span');
+      здесь.className = 'bi-toc-here';
+      здесь.textContent = 'вы здесь';
+      row.appendChild(здесь);
+    }
+    if (файл && перейти) row.addEventListener('click', () => перейти(i, i === тут));
+    box.appendChild(row);
+  });
+  // пару лишних строк прятать незачем; и не прятать главу, на которой остановился читатель
+  if (главы.length > BI_TOC_FOLD + 2 && тут < BI_TOC_FOLD) {
+    box.classList.add('folded');
+    const ещё = document.createElement('button');
+    ещё.type = 'button';
+    ещё.className = 'bi-toc-more';
+    ещё.textContent = `Показать всё оглавление · ${читаемых}`;
+    ещё.addEventListener('click', () => { box.classList.remove('folded'); ещё.remove(); });
+    box.appendChild(ещё);
+  }
+  return box;
 }
 
 /* ===== карточка книги: большая обложка, автор, аннотация, кнопки чтения ===== */
@@ -5958,7 +6269,7 @@ async function renderBookInfo(entry) {
   back.type = 'button';
   back.className = 'bookinfo-back';
   back.textContent = '← ' + kindMeta(kindOf(entry)).all;
-  back.addEventListener('click', () => { history.pushState({}, '', location.pathname); renderLibrary(); });
+  back.addEventListener('click', () => { navPush(location.pathname); renderLibrary(); });
   stream.appendChild(back);
 
   // манифест книги — за автором, аннотацией и числом глав
@@ -6010,7 +6321,9 @@ async function renderBookInfo(entry) {
     meta.appendChild(a);
   }
   const bits = [];
-  if (manifest && Array.isArray(manifest.chapters)) bits.push(`глав: ${manifest.chapters.length}`);
+  // считаем главы с текстом, как и оглавление ниже: записи-группы (без файла) — не главы
+  if (manifest && Array.isArray(manifest.chapters))
+    bits.push(`глав: ${manifest.chapters.filter(ch => (entry.draft ? !!ch && !ch.header : chHasFile(ch))).length}`);
   if (manifest && Array.isArray(manifest.languages) && manifest.languages.length > 1)
     bits.push('параллельный текст: ' + manifest.languages.map(l => langName(l).toLowerCase()).join(' + '));
   if (entry.tags && entry.tags.length) bits.push(entry.tags.join(', '));
@@ -6030,7 +6343,7 @@ async function renderBookInfo(entry) {
   const actions = document.createElement('div');
   actions.className = 'bookinfo-actions';
   const goRead = (opts = {}) => {
-    history.pushState({}, '', '?book=' + encodeURIComponent(entry.id));
+    navPush('?book=' + encodeURIComponent(entry.id));
     openBook(entry, opts);
   };
   /* `draft: true` в реестре — карточка книги есть, а текста ещё нет: показываем
@@ -6044,6 +6357,8 @@ async function renderBookInfo(entry) {
     meta.appendChild(actions);
     box.appendChild(meta);
     stream.appendChild(box);
+    const план = bookInfoToc(entry, manifest, null);   // из чего книга будет состоять; читать ещё нечего
+    if (план) stream.appendChild(план);
     return;
   }
   const l = getLast(entry.id);
@@ -6064,6 +6379,9 @@ async function renderBookInfo(entry) {
   meta.appendChild(actions);
   box.appendChild(meta);
   stream.appendChild(box);
+  // глава, где остановились, открывается на своём месте; любая другая — с начала
+  const оглавление = bookInfoToc(entry, manifest, (i, тут) => goRead(тут ? {} : { chapter: i }));
+  if (оглавление) stream.appendChild(оглавление);
   window.scrollTo(0, 0);
 }
 
@@ -6144,7 +6462,10 @@ async function openBook(entry, opts = {}) {
   }
   // переход в главу по номеру (из панели шарха, из пометки без сектора)
   if (Number.isInteger(opts.chapter) && opts.chapter >= 0 && opts.chapter < book.chapters.length) {
-    await loadChapter(opts.chapter); return;
+    await loadChapter(opts.chapter);
+    // комикс читают кадрами: «Читать» открывает его так — и глава с карточки или из поиска тоже
+    if (book && bookId === entry.id && book.view === 'comic') openComic(chapterIndex, 0);
+    return;
   }
   if (opts.fromStart) { await loadChapter(0); if (book.view === 'comic') openComic(chapterIndex, 0); return; }
   const last = getLast(bookId);
@@ -6167,7 +6488,7 @@ async function chapterOfSector(secId) {
 
 /* маршрут по ?book=<id>&c=<глава>&s=<sector>: запись из списка — читаем, иначе — библиотека.
    Тип записи в адресе не участвует: ?book=<id> открывает и книгу, и статью. */
-function route() {
+function route(изИстории = false) {
   const params = new URLSearchParams(location.search);
   const wanted = params.get('book');
   const entry = wanted ? library.find(b => b.id === wanted) : null;
@@ -6192,21 +6513,35 @@ function route() {
   if (infoEntry) { renderBookInfo(infoEntry); return; }
   // записи из адреса нет — показываем полку, но помним, что шли не сюда (см. retryWanted)
   wantedMiss = wanted || info || null;
+  if (!wantedMiss) applyShelfUrl(params, изИстории);   // ?tab=…&cat=…: полка, какой её описывает адрес
   renderLibrary();
 }
 window.addEventListener('popstate', () => {
-  if (suppressPop) { suppressPop = false; if (backResolve) backResolve(); return; }
-  if (overlayMark) { overlayMark = false; if (closeTopPopup()) return; }
-  route();
+  /* Ушёл маркер панели (своим шагом назад или кнопкой «назад») — под ним та же полка, что
+     на экране, но с адресом на момент открытия панели. Экран здесь главнее: дописываем
+     адрес, а не читаем его, иначе закрытие панели фильтров откатывало бы сам фильтр. */
+  if (suppressPop) { suppressPop = false; if (backResolve) backResolve(); writeShelfUrl(); return; }
+  if (overlayMark) {
+    overlayMark = false;
+    if (closeTopPopup()) { writeShelfUrl(); return; }
+    if (onShelf) { writeShelfUrl(); return; }   // панель закрыли кнопкой, маркер остался: это не переход
+  }
+  /* Шаг «вперёд» на маркер давно закрытой панели: панели нет, показывать нечего. Читать адрес
+     маркера нельзя — в нём полка на момент закрытия панели, это откатило бы выбранное после.
+     И оставаться на нём нельзя — в истории стало бы две записи одной полки, и «назад» с
+     маркера откатывал бы отбор. Возвращаемся на запись полки: «вперёд» здесь ничего не делает. */
+  if (onShelf && history.state && history.state.overlay) { suppressPop = true; history.back(); return; }
+  route(true);
 });
 
 $('#btn-home').addEventListener('click', () => {
-  history.pushState({}, '', location.pathname);
+  navPush(location.pathname);
   renderLibrary();
 });
 $('#btn-cattree').addEventListener('click', openTree);
 $('#tree-backdrop').addEventListener('click', closeTree);
-$('#filter-apply').addEventListener('click', () => { $('#filter-sheet').hidden = true; });
+// закрывая панель, снимаем и её маркер в истории: иначе под ним остаётся адрес полки до правки фильтров
+$('#filter-apply').addEventListener('click', () => { $('#filter-sheet').hidden = true; consumeOverlayMark(); });
 $('#filter-reset').addEventListener('click', () => {
   settings.shelfFacets = {}; saveSettings();
   renderLibrary(); renderFilterSheet();

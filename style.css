@@ -2368,3 +2368,75 @@ body.toc-ready #chapter-title:not(:empty)::after { content: ' ▾'; color: var(-
 @media (prefers-reduced-motion: reduce) {
   .cont-card:active, .next-card:active { transform: none; }
 }
+
+/* ===== навигация: один поиск, оглавление на карточке книги (15.11.2026) ===== */
+
+/* окно поиска: записи и главы по названию стоят перед совпадениями в тексте */
+#search-results > .search-count { margin-top: 0.9rem; }
+#search-results > .search-count:first-child { margin-top: 0; }
+.search-empty { color: var(--muted); }
+.search-entry { display: flex; align-items: center; gap: 0.7rem; }
+.search-thumb {
+  flex: 0 0 auto;
+  display: block;
+  width: 30px;
+  aspect-ratio: 5 / 7.4;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--border);
+}
+.search-thumb img, .search-thumb .cover-gen { display: block; width: 100%; height: 100%; object-fit: cover; }
+.search-thumb .cover-gen { display: flex; font-size: 0.26rem; padding: 0.1rem; }
+.search-entry-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.search-entry-title { font-weight: bold; text-align: start; }
+.search-entry .search-meta { margin: 0.1rem 0 0; }
+.search-chapter-title { display: block; text-align: start; }
+.search-more {
+  display: block;
+  width: 100%;
+  padding: 0.45rem 0.2rem;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  color: var(--accent);
+  font-size: 0.9rem;
+  text-align: start;
+}
+
+/* оглавление на карточке книги: дерево глав, в главу — одно касание */
+.bi-toc {
+  max-width: 46rem;
+  margin: 1.4rem auto 0;
+  padding: 0.6rem 0.8rem 0.4rem;
+  border-radius: 10px;
+  background: var(--panel);
+}
+@media (min-width: 700px) { .bi-toc { max-width: 58rem; } }
+@media (min-width: 1100px) { .bi-toc { max-width: 64rem; } }
+.bi-toc-h { color: var(--muted); font-size: 0.85rem; margin-bottom: 0.15rem; }
+.bi-toc-item, .bi-toc-group {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.8rem;
+  width: 100%;
+  padding: 0.42rem 0.1rem;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  text-align: start;
+  font-size: 0.97rem;
+}
+.bi-toc-h + .bi-toc-item, .bi-toc-h + .bi-toc-group { border-top: none; }
+.bi-toc-group { font-weight: bold; }
+.bi-toc-title { flex: 1 1 auto; min-width: 0; text-align: start; }
+.bi-toc-item.current .bi-toc-title { color: var(--accent); font-weight: bold; }
+.bi-toc-here { flex: 0 0 auto; color: var(--accent); font-size: 0.78rem; white-space: nowrap; }
+.bi-toc.folded .extra { display: none; }
+.bi-toc-more {
+  width: 100%;
+  padding: 0.45rem 0.1rem;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  color: var(--accent);
+  font-size: 0.9rem;
+  text-align: start;
+}
