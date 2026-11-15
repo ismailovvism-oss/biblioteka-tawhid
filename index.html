@@ -254,7 +254,11 @@
     <p class="about-line">Машинный перевод выделенного фрагмента. <b>Он не становится частью книги</b> — показывается отдельной карточкой и подписан как машинный.</p>
 
     <label>Ключ OpenRouter
-      <input id="mt-key" type="password" placeholder="sk-or-v1-…" autocomplete="off" spellcheck="false">
+      <!-- не type="password": с ним браузер считает страницу формой входа, сохраняет ключ как
+           пароль и при каждом открытии подставляет «логин» (сохранённую почту) в первое
+           попавшееся текстовое поле — так оглавление в Edge отвечало «Глав по запросу "почта" нет».
+           Точки вместо знаков рисует стиль (.secret). -->
+      <input id="mt-key" class="secret" type="text" placeholder="sk-or-v1-…" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
     </label>
     <p class="about-line acc-note" id="mt-key-state"></p>
     <div class="backup-row">

@@ -2113,6 +2113,9 @@ body[data-busy]::after {
   body[data-busy]::after { animation: none; background: var(--accent); opacity: 0.55; }
 }
 
+/* Поле для ключа: знаки прячем стилем, а не type="password" (см. index.html, #mt-key). */
+.secret { -webkit-text-security: disc; }
+
 /* Сообщение с кнопкой («Текст обновился · Показать»). */
 .toast.has-action {
   display: flex;
@@ -2136,3 +2139,31 @@ body[data-busy]::after {
 /* поиск: книги, которые не загрузились */
 .search-note { margin: 0.2rem 0 0.5rem; color: var(--muted); font-size: 0.85rem; }
 .search-note button { padding: 0.1rem 0.5rem; text-decoration: underline; color: var(--accent); }
+
+/* ===== шапка в чтении: название раздела видно и ведёт к оглавлению (15.11.2026) =====
+   На телефоне в строке шапки семь значков и переключатель языков, названию раздела
+   оставалось 19 пикселей — «В…», а при крупном шрифте в браузере и вовсе ничего. Читатель
+   не видел, где он находится, и не находил список разделов: значок оглавления среди семи
+   других ничем не выделен. Теперь на узком экране название идёт своей строкой под значками,
+   а нажатие на него (на любом экране) открывает оглавление. */
+body[data-view="reading"] #chapter-title { cursor: pointer; }
+body[data-view="reading"] #chapter-title::after { content: ' ▾'; color: var(--muted); font-size: 0.8em; }
+@media (max-width: 640px) {
+  body[data-view="reading"] { padding-top: 5.4rem; }
+  body[data-view="reading"] #topbar { flex-wrap: wrap; row-gap: 0.25rem; padding-bottom: 0.3rem; }
+  body[data-view="reading"] #chapter-title {
+    order: 10;
+    flex: 1 0 100%;
+    padding: 0.3rem 0.4rem 0;
+    border-top: 1px solid var(--border);
+    font-size: 0.9rem;
+    font-weight: bold;
+  }
+  /* название ушло из строки значков — правую пару (языки, настройки) прижимаем к краю сами */
+  body[data-view="reading"] #btn-vis { margin-inline-start: auto; }
+  body[data-view="reading"] #btn-warn:not([hidden]) { margin-inline-start: auto; }
+  body[data-view="reading"] #btn-warn:not([hidden]) + #btn-vis { margin-inline-start: 0; }
+  /* шапка стала выше — переход к абзацу и разделу не должен прятать их под ней */
+  body[data-view="reading"] .pair { scroll-margin-top: 5.6rem; }
+  body[data-view="reading"] .art-sec { scroll-margin-top: 6.2rem; }
+}

@@ -3857,7 +3857,44 @@ async function settleBack() {
   await p;
   if (backDone === p) backDone = null;
 }
-$('#btn-toc').addEventListener('click', () => { openOverlay($('#toc')); fillPageRanges(); });
+$('#btn-toc').addEventListener('click', () => { syncTocFilter(); openOverlay($('#toc')); fillPageRanges(); });
+// название раздела в шапке — тоже вход в оглавление: его видно, а значок среди семи других легко не заметить
+$('#chapter-title').addEventListener('click', () => {
+  if (!book || document.body.dataset.view !== 'reading') return;
+  syncTocFilter();
+  openOverlay($('#toc'));
+  fillPageRanges();
+});
+/* ===== автозаполнение браузера — не в наши поля =====
+   Браузер, сохранивший для сайта почту (её вводят при входе), сам подставляет её в текстовое
+   поле, которое сочтёт «логином», — в том числе в скрытое. Первым пострадало поле поиска на
+   полке (полка «пустела», см. renderLibrary), 15.11.2026 — фильтр оглавления: Edge на
+   телефоне вписал туда почту, и вместо разделов читатель видел «Глав по запросу "почта" нет»,
+   причём у статьи фильтр скрыт, и стереть его было нечем.
+   Правило одно на все свои поля: значение, появившееся в поле БЕЗ фокуса, пришло не от
+   читателя — стираем его и не даём дойти до обработчиков. Читатель вводит только в поле с
+   фокусом (клавиатура, вставка, голос); сам код меняет значение без события input. */
+function guardAutofill(input) {
+  if (!input) return;
+  input.setAttribute('autocomplete', 'off');
+  const чужое = e => {
+    if (document.activeElement === input || !input.value) return;
+    input.value = '';
+    e.stopImmediatePropagation();
+  };
+  // на захвате: срабатывает раньше обработчиков самого поля, они чужого значения не увидят
+  input.addEventListener('input', чужое, true);
+  input.addEventListener('change', чужое, true);
+}
+['#toc-filter', '#search-input', '#clips-q', '#mark-tags', '#mt-prompt-name', '#mt-model'].forEach(sel => guardAutofill($(sel)));
+
+/* Браузер умеет заполнить поле и молча, без события. Поэтому, открывая оглавление, приводим
+   поле к тому, что читатель действительно вводил (tocQuery меняется только набором). */
+function syncTocFilter() {
+  const f = $('#toc-filter');
+  if (f && document.activeElement !== f && f.value.trim() !== tocQuery) f.value = tocQuery;
+}
+
 if ($('#toc-filter')) {
   let tocTimer = null;
   $('#toc-filter').addEventListener('input', e => {
@@ -4522,6 +4559,7 @@ $('#btn-search').addEventListener('click', () => {
   bookChip.classList.toggle('chip-off', !bookId);
   bookChip.textContent = bookId && kindOf(bookEntry) === 'article' ? 'Эта статья' : 'Эта книга';
   setSearchScope(bookId ? 'book' : 'library');
+  if ($('#search-input').value !== searchTyped) $('#search-input').value = searchTyped;   // чужое (автозаполнение) — прочь
   openOverlay($('#search'));
   $('#search-input').focus();
 });
@@ -4534,12 +4572,15 @@ $('#search-scope').querySelectorAll('.chip').forEach(c => c.addEventListener('cl
 /* Поиск идёт по мере набора. Короткая задержка — чтобы не искать на каждую букву быстрого
    набора; «Найти» и Enter ищут сразу, не дожидаясь её. */
 let searchTimer = null;
+let searchTyped = '';   // что в поле поиска ввёл сам читатель (а не подставил браузер)
 $('#search-form').addEventListener('submit', e => {
   e.preventDefault();
   clearTimeout(searchTimer);
+  searchTyped = $('#search-input').value;
   runSearch($('#search-input').value);
 });
 $('#search-input').addEventListener('input', () => {
+  searchTyped = $('#search-input').value;
   clearTimeout(searchTimer);
   searchTimer = setTimeout(() => {
     const q = $('#search-input').value;
