@@ -46,6 +46,7 @@ const ТИПЫ = {
 
 const состояние = { mode: 'ok', hits: 0, log: [], ms: 6000 };
 const висят = new Set();   // ответы, оставленные без ответа в режиме hang
+const ждут = new Map();    // ответ → таймер задержки в режиме slow
 
 http.createServer((req, res) => {
   const адрес = new URL(req.url, 'http://x');
@@ -57,6 +58,9 @@ http.createServer((req, res) => {
        даёт на адрес всего шесть: стенд остаётся отравленным до перезапуска, и следующая
        проверка меряет не читалку, а очередь за мёртвыми запросами. */
     if (состояние.mode !== 'hang') { for (const r of висят) r.destroy(); висят.clear(); }
+    /* То же с задержанными: сменили режим — запросы, принятые в slow, не должны через
+       несколько секунд прийти обычным ответом и подмешаться в замер «молчащего сервера». */
+    if (состояние.mode !== 'slow') { for (const [r, т] of ждут) { clearTimeout(т); r.destroy(); } ждут.clear(); }
     if (адрес.searchParams.has('reset')) { состояние.hits = 0; состояние.log = []; }
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify({ mode: состояние.mode, hits: состояние.hits, log: состояние.log.slice(-600) }));
@@ -77,7 +81,12 @@ http.createServer((req, res) => {
     return;
   }
 
-  if (состояние.mode === 'slow') { setTimeout(() => отдать(req, res, адрес), состояние.ms); return; }
+  if (состояние.mode === 'slow') {
+    const т = setTimeout(() => { ждут.delete(res); отдать(req, res, адрес); }, состояние.ms);
+    ждут.set(res, т);
+    res.on('close', () => { clearTimeout(т); ждут.delete(res); });   // вкладку закрыли — ждать некого
+    return;
+  }
   отдать(req, res, адрес);
 }).listen(порт, '127.0.0.1', () => {
   console.log(`стенд читалки (режимы — /__stend?mode=ok|hang|down|stub|slow):`);
@@ -100,7 +109,10 @@ function отдать(req, res, адрес) {
        что работают на сайте: сверка по метке и запросы мимо HTTP-кеша браузера. */
     const изменён = new Date(ст.mtime); изменён.setMilliseconds(0);
     const метка = `W/"${ст.size.toString(16)}-${изменён.getTime().toString(16)}"`;
-    const общие = { ETag: метка, 'Last-Modified': изменён.toUTCString(), 'Cache-Control': 'max-age=600' };
+    // на localhost (режим разработки) — «не хранить»: иначе браузер десять минут отдаёт прежний
+    // app.js из своей памяти, и правка не видна; на 127.0.0.1 — как на сайте
+    const дома = (req.headers.host || '').startsWith('localhost');
+    const общие = { ETag: метка, 'Last-Modified': изменён.toUTCString(), 'Cache-Control': дома ? 'no-cache' : 'max-age=600' };
     const знает = req.headers['if-none-match'], с = req.headers['if-modified-since'];
     if (знает ? знает === метка : (с && new Date(с) >= изменён)) { res.writeHead(304, общие); res.end(); return; }
     res.writeHead(200, Object.assign({

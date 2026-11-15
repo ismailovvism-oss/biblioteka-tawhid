@@ -2145,25 +2145,226 @@ body[data-busy]::after {
    оставалось 19 пикселей — «В…», а при крупном шрифте в браузере и вовсе ничего. Читатель
    не видел, где он находится, и не находил список разделов: значок оглавления среди семи
    других ничем не выделен. Теперь на узком экране название идёт своей строкой под значками,
-   а нажатие на него (на любом экране) открывает оглавление. */
-body[data-view="reading"] #chapter-title { cursor: pointer; }
-body[data-view="reading"] #chapter-title::after { content: ' ▾'; color: var(--muted); font-size: 0.8em; }
-@media (max-width: 640px) {
-  body[data-view="reading"] { padding-top: 5.4rem; }
+   а нажатие на него (на любом экране) открывает оглавление.
+   Стрелка и курсор — только при .toc-ready (оглавление этой записи построено): пока запись
+   грузится или не загрузилась, название — «Загрузка…» или «Ошибка», и вести ему некуда. */
+body.toc-ready #chapter-title { cursor: pointer; }
+body.toc-ready #chapter-title:not(:empty)::after { content: ' ▾'; color: var(--muted); font-size: 0.8em; }
+@media (max-width: 640.98px) {
+  /* высоту шапки меряет app.js (--topbar-h): при крупном шрифте значки занимают две строки,
+     и название становится третьей — подогнанное число спрятало бы начало текста под шапку */
+  body[data-view="reading"] { padding-top: calc(var(--topbar-h, 4.9rem) + 0.5rem); }
   body[data-view="reading"] #topbar { flex-wrap: wrap; row-gap: 0.25rem; padding-bottom: 0.3rem; }
   body[data-view="reading"] #chapter-title {
     order: 10;
     flex: 1 0 100%;
-    padding: 0.3rem 0.4rem 0;
+    position: relative;
+    padding: 0.3rem 1.5rem 0 0.4rem;
     border-top: 1px solid var(--border);
     font-size: 0.9rem;
     font-weight: bold;
+  }
+  /* стрелка — у правого края строки, вне обрезаемого текста: длинное название кончается
+     многоточием, и стрелка в хвосте текста пропадала бы именно там, где она нужнее */
+  body.toc-ready #chapter-title:not(:empty)::after {
+    content: '▾';
+    position: absolute;
+    inset-inline-end: 0.45rem;
+    top: 0.3rem;
+    font-weight: normal;
   }
   /* название ушло из строки значков — правую пару (языки, настройки) прижимаем к краю сами */
   body[data-view="reading"] #btn-vis { margin-inline-start: auto; }
   body[data-view="reading"] #btn-warn:not([hidden]) { margin-inline-start: auto; }
   body[data-view="reading"] #btn-warn:not([hidden]) + #btn-vis { margin-inline-start: 0; }
   /* шапка стала выше — переход к абзацу и разделу не должен прятать их под ней */
-  body[data-view="reading"] .pair { scroll-margin-top: 5.6rem; }
-  body[data-view="reading"] .art-sec { scroll-margin-top: 6.2rem; }
+  body[data-view="reading"] .pair { scroll-margin-top: calc(var(--topbar-h, 4.9rem) + 0.7rem); }
+  body[data-view="reading"] .art-sec { scroll-margin-top: calc(var(--topbar-h, 4.9rem) + 1.3rem); }
+}
+
+/* ===== полка и статья: вторая волна (15.11.2026) =====
+   Ряд «Продолжить», чипы, «Новое», «Начните отсюда», «Содержание», «Что читать дальше». */
+
+/* полоса прочитанного — общая для ряда «Продолжить» и начатой статьи в ленте */
+.read-bar { display: block; height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; }
+.read-bar i { display: block; height: 100%; border-radius: 2px; background: var(--accent); }
+
+/* ряд «Продолжить»: карточки листаются вбок, первая — самая свежая */
+.cont { max-width: 46rem; margin: 0 auto 0.6rem; }
+.cont-h { display: flex; align-items: center; gap: 0.3rem; margin: 0 0 0.35rem; color: var(--muted); font-size: 0.85rem; }
+.cont-h .ico { width: 0.95em; height: 0.95em; }
+.cont-row {
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  padding-bottom: 0.15rem;
+}
+.cont-row::-webkit-scrollbar { display: none; }
+/* С мышью ряд вбок не листается: полоса скрыта, колесо крутит страницу. Там, где есть мышь,
+   тонкую полосу оставляем — иначе четвёртая и дальнейшие карточки недоступны. */
+@media (hover: hover) and (pointer: fine) {
+  .cont-row { scrollbar-width: thin; padding-bottom: 0.35rem; }
+  .cont-row::-webkit-scrollbar { display: block; height: 6px; }
+  .cont-row::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+}
+.cont-card {
+  flex: 1 0 13.5rem;
+  max-width: min(100%, 22rem);   /* одна карточка на широком экране не растягивается во всю колонку */
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--active-bg);
+  text-align: start;
+  scroll-snap-align: start;
+  transition: transform 90ms ease-out, opacity 90ms ease-out;
+}
+.cont-card:active { transform: scale(0.975); opacity: 0.85; }
+.cont-thumb {
+  flex: 0 0 auto;
+  display: block;
+  width: 34px;
+  aspect-ratio: 5 / 7.4;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--border);
+}
+.cont-thumb img, .cont-thumb .cover-gen { display: block; width: 100%; height: 100%; object-fit: cover; }
+.cont-thumb .cover-gen { display: flex; font-size: 0.3rem; padding: 0.12rem; }
+.cont-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+.cont-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.95rem; text-align: start; }
+.cont-meta { color: var(--muted); font-size: 0.78rem; }
+
+/* чипы: состояние чтения и длина; ряд листается вбок, если не помещается */
+.shelf-chips, .sec-chips {
+  display: flex;
+  gap: 0.4rem;
+  max-width: 46rem;
+  margin: 0.45rem auto 0.2rem;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.shelf-chips::-webkit-scrollbar, .sec-chips::-webkit-scrollbar { display: none; }
+.shelf-chips .chip, .sec-chips .chip { flex: 0 0 auto; white-space: nowrap; }
+/* с мышью ряд чипов вбок не пролистать — пусть переносится на вторую строку */
+@media (hover: hover) and (pointer: fine) {
+  .shelf-chips, .sec-chips { flex-wrap: wrap; overflow-x: visible; }
+}
+/* ряды с прокруткой обрезают всё, что выступает за край, — и рамку фокуса тоже; рисуем её
+   внутрь, чтобы с клавиатуры было видно, где стоишь */
+.cont-row :focus-visible, .shelf-chips :focus-visible, .sec-chips :focus-visible { outline-offset: -2px; }
+.chip-n { margin-inline-start: 0.35em; opacity: 0.6; font-size: 0.85em; }
+/* разделы чипами — только там, где дерево разделов спрятано в меню; на широком экране оно
+   стоит слева, и второй список разделов был бы повтором */
+.sec-chips { margin-top: 0.55rem; }
+@media (min-width: 700px) { .sec-chips { display: none; } }
+/* 699.98, а не 699: при дробной ширине окна (масштаб 110%) между 699 и 700 не сработало бы
+   ни одно из двух правил */
+@media (max-width: 699.98px) { .classifier.at-root { display: none; } }
+
+/* «Начните отсюда» — закреплённое автором */
+.pinned {
+  max-width: 46rem;
+  margin: 0.5rem auto 0.3rem;
+  padding: 0.6rem 0.8rem 0.4rem;
+  border-radius: 10px;
+  background: var(--panel);
+}
+.pinned-h { display: flex; align-items: center; gap: 0.35rem; margin-bottom: 0.2rem; font-weight: bold; font-size: 0.92rem; }
+.pinned-h .ico { width: 1em; height: 1em; }
+.pinned-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.8rem;
+  width: 100%;
+  padding: 0.4rem 0.1rem;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  text-align: start;
+}
+.pinned-item:first-of-type { border-top: none; }
+.pinned-title { min-width: 0; flex: 1 1 auto; text-align: start; }
+.pinned-meta { flex: 0 0 auto; color: var(--muted); font-size: 0.8rem; white-space: nowrap; }
+
+/* «Новое» и прочитанное в ленте статей */
+.new-tag {
+  display: inline-block;
+  vertical-align: 0.15em;
+  padding: 0.05em 0.55em;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.68em;
+  font-weight: normal;
+  white-space: nowrap;
+}
+.art-card.is-read .art-thumb, .art-card.is-read .art-card-title, .art-card.is-read .art-desc { opacity: 0.55; }
+.art-card .read-bar { margin-top: 0.2rem; max-width: 14rem; }
+
+/* «Содержание» в начале статьи */
+.art-toc {
+  margin: 1.1rem 0 0;
+  padding: 0.55rem 0.8rem 0.35rem;
+  border-radius: 10px;
+  background: var(--panel);
+}
+.art-toc-h { color: var(--muted); font-size: 0.82rem; margin-bottom: 0.15rem; }
+.art-toc-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.8rem;
+  width: 100%;
+  padding: 0.38rem 0.1rem;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  text-align: start;
+  font-size: 0.95rem;
+}
+.art-toc-h + .art-toc-item { border-top: none; }
+.art-toc-title { min-width: 0; flex: 1 1 auto; text-align: start; }
+.art-toc-min { flex: 0 0 auto; color: var(--muted); font-size: 0.8rem; white-space: nowrap; }
+.art-toc.folded .art-toc-item.extra { display: none; }
+.art-toc-more { width: 100%; padding: 0.4rem 0.1rem; border-top: 1px solid var(--border); border-radius: 0; color: var(--accent); font-size: 0.9rem; text-align: start; }
+
+/* «Что читать дальше» — под «Концом статьи» */
+.art-next { margin: 0.4rem 0 2rem; display: flex; flex-direction: column; gap: 0.55rem; }
+.art-next-h { margin: 0 0 0.1rem; font-size: 1.05rem; }
+.next-card {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  text-align: start;
+  transition: transform 90ms ease-out, opacity 90ms ease-out;
+}
+.next-card.primary { border: 2px solid var(--accent); background: var(--accent-soft); }
+.next-card:active { transform: scale(0.975); opacity: 0.85; }
+.next-thumb {
+  flex: 0 0 auto;
+  display: block;
+  width: 40px;
+  aspect-ratio: 5 / 7.4;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--border);
+}
+.next-thumb img, .next-thumb .cover-gen { display: block; width: 100%; height: 100%; object-fit: cover; }
+.next-thumb .cover-gen { display: flex; font-size: 0.32rem; padding: 0.14rem; }
+.next-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 0.12rem; }
+.next-why { color: var(--muted); font-size: 0.78rem; }
+.next-title { font-weight: bold; line-height: 1.3; text-align: start; }
+.next-meta { color: var(--muted); font-size: 0.8rem; }
+@media (prefers-reduced-motion: reduce) {
+  .cont-card:active, .next-card:active { transform: none; }
 }

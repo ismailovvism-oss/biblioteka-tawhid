@@ -335,6 +335,8 @@ async function loadChapter(i, targetId) {
     const r = nextReadable(i, 1); i = r >= 0 ? r : nextReadable(i, -1);
     if (i < 0) return;
   }
+  // из предыдущей главы, а не прыжком из оглавления, поиска или по ссылке — см. atEnd
+  inOrder = streamOf === bookId && i === nextReadable(chapterIndex, 1);
   chapterIndex = i;
   updateChapterNav();
   loading = true;
@@ -362,6 +364,7 @@ async function loadChapter(i, targetId) {
   setLast(bookId, { chapter: i });
   recordReadDay();
   saveSettings();
+  syncTopbar();   // значки шапки могли появиться или скрыться — цель перехода не должна уйти под неё
   if (targetId) scrollToPair(targetId, false);
   else window.scrollTo(0, 0);
   loading = false;
@@ -411,16 +414,19 @@ async function loadArticle(ci, targetId) {
     if (!getLast(bookId)) setLast(bookId, { chapter: ci });
     saveSettings();
   }
-  /* Место: названный абзац, если он нашёлся; иначе заголовок раздела; первый раздел —
-     самый верх, к шапке статьи. При первом показе встаём сразу: плавная прокрутка через
-     всю статью — секунда мелькания, и по дороге в «последнее место» записались бы
-     промежуточные абзацы. */
+  /* Место: названный абзац, если он нашёлся; иначе заголовок раздела. Только что открытая
+     статья встаёт на самый верх, к шапке; а выбранный читателем первый раздел — на свой
+     заголовок: над ним шапка с «Содержанием», и «наверх» по нажатию в этом самом
+     «Содержании» не сдвинуло бы страницу вовсе. При первом показе встаём сразу: плавная
+     прокрутка через всю статью — секунда мелькания, и по дороге в «последнее место»
+     записались бы промежуточные абзацы. */
   const behavior = заново ? 'instant' : 'smooth';
   if (!заново) await settleBack();   // панель оглавления ещё закрывается — см. settleBack
+  syncTopbar();   // значки шапки могли появиться или скрыться — цель перехода не должна уйти под неё
   const el = targetId ? pairAt(ci, targetId) : null;
   const раздел = stream.querySelector(`.art-sec[data-sec="${ci}"]`);
   if (el) { el.scrollIntoView({ behavior, block: 'start' }); flash(el); }
-  else if (раздел && ci !== streamChapters[0]) раздел.scrollIntoView({ behavior, block: 'start' });
+  else if (раздел && (!заново || ci !== streamChapters[0])) раздел.scrollIntoView({ behavior, block: 'start' });
   else window.scrollTo({ top: 0, behavior });
   loading = false;
   markTocCurrent();
@@ -488,7 +494,122 @@ function articleHead() {
     setTextSlw(p, аннотация);
     head.appendChild(p);
   }
+  // разделы статьи — сразу под аннотацией: видно, из чего она состоит, и к нужному один шаг
+  const разделы = inStream().filter(k => chHasFile(book.chapters[k]));
+  if (разделы.length >= 3) head.appendChild(articleToc(разделы));
   return head;
+}
+
+/* «Содержание» статьи. Статья читается одной страницей, без «Далее», и о том, что в ней
+   есть разделы, раньше говорил только значок оглавления в шапке (автор: «главы в статьях
+   пропали»). Рядом с названием — время чтения раздела: по словам основного текста на языке
+   чтения, без сносок, тем же счётом, что и время всей статьи. Длинный список свёрнут. */
+const ART_TOC_FOLD = 5;
+function articleToc(разделы) {
+  const язык = book.languages.includes('ru') ? 'ru' : book.languages[book.languages.length - 1];
+  const минут = k => {
+    let слов = 0;
+    for (const pair of pairsOf(k)) {
+      if (pair.type === 'footnote' || pair[язык] == null) continue;
+      слов += (htmlPlain(pair[язык]).match(СЛОВО) || []).length;
+    }
+    return Math.max(1, Math.round(слов / READ_WPM));
+  };
+  const box = document.createElement('nav');
+  box.className = 'art-toc';
+  box.setAttribute('aria-label', 'Содержание статьи');
+  const h = document.createElement('div');
+  h.className = 'art-toc-h';
+  h.textContent = `Содержание · ${разделы.length} ${plural(разделы.length, 'раздел', 'раздела', 'разделов')}`;
+  box.appendChild(h);
+  разделы.forEach((k, n) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'art-toc-item' + (n >= ART_TOC_FOLD ? ' extra' : '');
+    const t = document.createElement('span');
+    t.className = 'art-toc-title';
+    t.dir = 'auto';
+    setTextSlw(t, pickTitle(book.chapters[k].title || {}));
+    const м = document.createElement('span');
+    м.className = 'art-toc-min';
+    м.textContent = `${минут(k)} мин`;
+    b.append(t, м);
+    b.addEventListener('click', () => loadChapter(k));
+    box.appendChild(b);
+  });
+  // один лишний раздел прятать незачем: «Показать все 6» вместо шестой строки — не экономия
+  if (разделы.length > ART_TOC_FOLD + 1) {
+    box.classList.add('folded');
+    const ещё = document.createElement('button');
+    ещё.type = 'button';
+    ещё.className = 'art-toc-more';
+    ещё.textContent = `Показать все ${разделы.length}`;
+    ещё.addEventListener('click', () => { box.classList.remove('folded'); ещё.remove(); });
+    box.appendChild(ещё);
+  }
+  return box;
+}
+
+/* «Что читать дальше» — под «Концом статьи». Дочитал — и вместо тупика три шага на выбор:
+   следующая часть серии; непрочитанное из того же раздела; свежее непрочитанное. Отдельным
+   блоком ПОСЛЕ .art-end, а не внутри: по низу .art-end считается доля прочитанного. */
+function articleNext() {
+  const я = bookEntry;
+  if (!я) return null;
+  const прочие = library.filter(e => kindOf(e) === 'article' && !e.draft && e.id !== я.id);
+  const свежее = (a, b) => String(b.date || '').localeCompare(String(a.date || ''));
+  // сперва то, чего читатель ещё не открывал, потом начатое; внутри — свежее первым
+  const нечитанные = прочие.filter(e => readState(e) !== 'done')
+    .sort((a, b) => (readState(a) === 'none' ? 0 : 1) - (readState(b) === 'none' ? 0 : 1) || свежее(a, b));
+  const взято = new Set(), список = [];
+  const взять = (e, повод, главный) => {
+    if (!e || взято.has(e.id)) return;
+    взято.add(e.id);
+    список.push({ e, повод, главный });
+  };
+  const серия = seriesOf(я);
+  if (серия && серия.part != null) {
+    const след = серия.parts.find(e => e.id !== я.id && partOf(e) > серия.part);
+    if (след) взять(след, `Серия «${серия.name}» · часть ${partOf(след)} из ${серия.of}`, true);
+  }
+  const путь = bookCatPath(я);
+  взять(нечитанные.find(e => !взято.has(e.id) && e.category === я.category), путь.length ? `Ещё в разделе «${путь[путь.length - 1]}»` : 'Ещё по теме');
+  const ещё = нечитанные.find(e => !взято.has(e.id));
+  if (ещё) взять(ещё, readState(ещё) === 'none' ? 'Вы ещё не читали' : 'Вы начали читать');
+  if (!список.length) return null;
+
+  const box = document.createElement('section');
+  box.className = 'art-next';
+  const h = document.createElement('h2');
+  h.className = 'art-next-h';
+  h.textContent = 'Что читать дальше';
+  box.appendChild(h);
+  for (const { e, повод, главный } of список) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'next-card' + (главный ? ' primary' : '');
+    const thumb = document.createElement('span');
+    thumb.className = 'next-thumb';
+    coverInto(thumb, e, '');
+    const main = document.createElement('span');
+    main.className = 'next-main';
+    const why = document.createElement('span');
+    why.className = 'next-why';
+    why.textContent = повод;
+    const t = document.createElement('span');
+    t.className = 'next-title';
+    t.dir = 'auto';
+    setTextSlw(t, entryLabel(e));
+    const m = document.createElement('span');
+    m.className = 'next-meta';
+    const st = readState(e);
+    m.textContent = [readTime(e), st === 'reading' ? 'читаю' : ''].filter(Boolean).join(' · ');
+    main.append(why, t, m);
+    b.append(thumb, main);
+    b.addEventListener('click', () => openEntry(e));
+    box.appendChild(b);
+  }
+  return box;
 }
 
 // заголовок раздела статьи (глава книги) или группы разделов (запись без файла)
@@ -650,6 +771,7 @@ function pairElement(pair, ci) {
 function renderChapter() {
   detachMtCard();          // иначе innerHTML = '' уничтожит карточку вместе с обработчиками
   stream.innerHTML = '';
+  streamOf = bookId;
   activeEl = null;
   applyHlMode();
   fnJump = null;
@@ -675,7 +797,11 @@ function renderChapter() {
       stream.appendChild(pairElement(pair, chapterIndex)); текста++;
     }
   }
-  if (текста || сноски.length) stream.appendChild(singlePage ? articleEnd() : chapterEndNav());
+  if (текста || сноски.length) {
+    stream.appendChild(singlePage ? articleEnd() : chapterEndNav());
+    const дальше = singlePage ? articleNext() : null;
+    if (дальше) stream.appendChild(дальше);
+  }
   if (сноски.length) {
     const h = document.createElement('h2');
     h.className = 'fn-divider';
@@ -790,15 +916,44 @@ function followSection() {
     if (ci !== chapterIndex) { chapterIndex = ci; pairs = pairsOf(ci); markTocCurrent(); }
   }
   const шапка = stream.querySelector('.art-head');
-  const вверху = !activeEl || (шапка && шапка.getBoundingClientRect().bottom > 70);
+  // шапка статьи ещё видна под панелью (панель на телефоне в две строки — мерим, а не помним число)
+  const вверху = !activeEl || (шапка && шапка.getBoundingClientRect().bottom > $('#topbar').offsetHeight + 24);
   const t = pickTitle((вверху ? book.title : (book.chapters[chapterIndex] || {}).title) || book.title);
   const el = $('#chapter-title');
   if (el.textContent !== t) el.textContent = t;
 }
 
+/* «Дочитал» — когда на экран поднялся конец текста, а не «доля от 97%»: у книги доля идёт
+   по главам, и в книге из 37 глав 97% набегают уже на пороге последней главы. У статьи
+   конец текста и есть доля (она считается до «Конца статьи»), у книги — надпись «Конец
+   книги» под последней главой. Отметка ставится один раз и не снимается (doneAt). */
+const READ_DONE = 97;   // с этой доли статья дочитана; дочитанную открываем сначала (openBook)
+function doneAt(l) {
+  if (!l || !l.ts) return 0;
+  if ('done' in l) return l.done || 0;
+  // место записано до v85: отметки ещё не было, а доля писалась только у статьи
+  return typeof l.pct === 'number' && l.pct >= READ_DONE ? l.ts : 0;
+}
+// состояние по записи о месте: 'none' — не читал, 'reading' — читает, 'done' — дочитал
+function stateOf(l) {
+  if (!l || !l.ts) return 'none';
+  if (doneAt(l)) return 'done';
+  /* Запись до v85 (без отметки `done`) писалась при каждом открытии, и «открыл и ушёл» в
+     ней от «читаю» не отличить — судим по месту: статья с нулевой долей, книга на первых
+     абзацах первой главы. Иначе после обновления ряд «Продолжить» у давнего читателя
+     заполнился бы всем, что он когда-либо открывал, с подписью «0%». */
+  if (!('done' in l)) {
+    if (typeof l.pct === 'number') { if (l.pct < 1) return 'none'; }
+    else if (!l.chapter && !l.frame && /^s0*[1-4]$/.test(l.sector || '')) return 'none';
+  }
+  return 'reading';
+}
 let bookPct = 0;
+let atEnd = false;      // на экране конец текста этой записи
+let inOrder = false;    // в главу книги пришли по порядку, из предыдущей (ставит loadChapter)
+let streamOf = null;    // id записи, чей текст сейчас в потоке (см. rememberPosition)
 function updateProgress() {
-  if (!book || !book.chapters.length) { bookPct = 0; return; }
+  if (!book || !book.chapters.length) { bookPct = 0; atEnd = false; return; }
   /* У книги прогресс — глава плюс доля главы. У статьи — доля прокрутки до КОНЦА ТЕКСТА,
      а не до конца страницы: ниже лежат сноски всей статьи (у «Фатихи» это половина
      объёма), и с ними дочитанная статья показывала бы 60%. */
@@ -808,6 +963,22 @@ function updateProgress() {
     : document.documentElement.scrollHeight - window.innerHeight;
   const cf = max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : (singlePage ? 1 : 0);
   bookPct = Math.round((singlePage ? cf : (chapterIndex + cf) / book.chapters.length) * 100);
+  if (singlePage) {
+    /* Короткая статья целиком на экране — дочитана с порога. Но пока грузятся картинки,
+       высота страницы не окончательна: статья из кадров на миг «умещается» вся. */
+    atEnd = bookPct >= READ_DONE && !(max <= 0 && [...stream.querySelectorAll('img')].some(i => !i.complete));
+  } else if (book.view === 'comic') {
+    atEnd = false;   // комикс читают кадрами: «дочитано» ставит comicRender на последнем кадре
+  } else {
+    /* «Конец книги» стоит только под последней главой. Если она короткая (приложение,
+       указатель), надпись видна сразу — и заход в неё из оглавления сделал бы книгу
+       прочитанной навсегда. Поэтому конец засчитывается, когда в главу пришли по порядку
+       либо долистали её (прокрутка дальше полэкрана). */
+    const метка = stream.querySelector('.ch-end-done');
+    const r = метка && метка.getBoundingClientRect();
+    atEnd = !!r && r.height > 0 && r.top < window.innerHeight
+      && (inOrder || window.scrollY > window.innerHeight / 2);
+  }
   document.body.style.setProperty('--progress', bookPct + '%');
 }
 
@@ -815,8 +986,22 @@ function updateProgress() {
 let posSaveTick = null;
 function rememberPosition() {
   if (!book || !activeEl || loading) return; // во время загрузки activeEl может быть из старой главы
-  const место = { chapter: chapterOf(activeEl), sector: activeEl.dataset.id, page: currentPage(), ts: Date.now() };
-  if (singlePage) место.pct = bookPct;   // статья: доля прочитанного — для ленты и чтобы дочитанную открыть сначала
+  /* Открывается следующая запись, а в потоке ещё текст прежней (он стоит, пока не придёт
+     новый): её место и её «дочитано» записались бы под чужим id. Так статья, открытая из
+     «Что читать дальше», оказалась бы прочитанной, не будучи открытой. */
+  if (streamOf !== bookId) return;
+  const было = getLast(bookId);
+  const глава = chapterOf(activeEl);
+  /* Открыл и ушёл — ещё не «читаю»: пока читатель стоит у самого начала, время и долю не
+     пишем, и запись не попадает в ряд «Продолжить» с подписью «0%». Начал — значит
+     прокрутил на полэкрана, ушёл дальше первой главы или увидел конец (короткий текст
+     целиком на экране). Начатое остаётся начатым, даже если вернулись к началу. */
+  const начато = stateOf(было) !== 'none' || atEnd || window.scrollY > window.innerHeight / 2
+    || (!singlePage && глава !== nextReadable(-1, 1));
+  if (!начато) return;
+  const место = { chapter: глава, sector: activeEl.dataset.id, page: currentPage(), ts: Date.now() };
+  место.pct = bookPct;   // доля прочитанного: лента, ряд «Продолжить»
+  место.done = doneAt(было) || (atEnd ? Date.now() : 0);   // чипы «Читаю / Прочитано»
   setLast(bookId, место);
   if (posSaveTick) clearTimeout(posSaveTick);
   posSaveTick = setTimeout(saveSettings, 500);
@@ -839,11 +1024,12 @@ function updatePageIndicator() {
 }
 
 let scrollTick = false;
-window.addEventListener('scroll', () => {
+function queueActive() {
   if (scrollTick) return;
   scrollTick = true;
   requestAnimationFrame(() => { scrollTick = false; updateActive(); });
-}, { passive: true });
+}
+window.addEventListener('scroll', queueActive, { passive: true });
 window.addEventListener('resize', () => { applyLayout(); updateActive(); });
 
 /* ===== ЛИСТАЛКА: > [!slides] (разметка — parser.js renderSlides) =====
@@ -909,6 +1095,8 @@ document.addEventListener('scroll', e => {
 document.addEventListener('load', e => {
   const img = e.target;
   if (img && img.tagName === 'IMG' && img.closest('.sl-slide')) { img.dataset.ok = '1'; slidesSync(img.closest('.slides')); }
+  // картинка в тексте пришла — высота страницы другая: долю и «конец на экране» пересчитать
+  if (img && img.tagName === 'IMG' && book && stream.contains(img)) queueActive();
 }, true);
 window.addEventListener('resize', () => document.querySelectorAll('.slides').forEach(slidesSync));
 // стрелки ←/→ листают кадры, пока листалка в фокусе или раскрыта; Esc — свернуть.
@@ -1028,7 +1216,17 @@ function comicRender() {
   $('#cm-next').disabled = comic.i === comic.frames.length - 1 && nextReadable(comic.ci, 1) < 0;
   const nx = comic.frames[comic.i + 1];                       // подгрузить следующий кадр заранее
   if (nx && nx.t === 'img') { const pre = new Image(); pre.src = nx.src; }
-  setLast(bookId, { chapter: comic.ci, frame: comic.i }); saveSettings();
+  /* Место в комиксе — кадр. Листание кадров прокрутки не даёт, поэтому долю, время и
+     «дочитано» пишем здесь (иначе в «Продолжить» стояла бы доля на момент открытия).
+     Первый кадр — ещё не «читаю», как и у текста (см. rememberPosition). */
+  const было = getLast(bookId);
+  const место = { chapter: comic.ci, frame: comic.i };
+  if (g > 0 || (было && было.ts)) {
+    место.ts = Date.now();
+    место.pct = comic.total > 1 ? Math.round(g / (comic.total - 1) * 100) : 100;
+    место.done = doneAt(было) || (g >= comic.total - 1 ? Date.now() : 0);
+  }
+  setLast(bookId, место); saveSettings();
 }
 async function comicGoto(ci, i) {
   comic.frames = await comicFrames(ci);
@@ -3832,6 +4030,7 @@ $('#set-import').addEventListener('change', e => {
 let overlayMark = false;   // наш маркер лежит в истории
 let suppressPop = false;   // свой history.back() при закрытии из UI — съесть без route()
 function openOverlay(el) {
+  restoreOwn(el);   // чужое (автозаполнение без события) — прочь, см. guardAutofill
   el.hidden = false;
   if (!overlayMark) { overlayMark = true; history.pushState({ overlay: true }, ''); }
 }
@@ -3857,43 +4056,89 @@ async function settleBack() {
   await p;
   if (backDone === p) backDone = null;
 }
-$('#btn-toc').addEventListener('click', () => { syncTocFilter(); openOverlay($('#toc')); fillPageRanges(); });
-// название раздела в шапке — тоже вход в оглавление: его видно, а значок среди семи других легко не заметить
-$('#chapter-title').addEventListener('click', () => {
-  if (!book || document.body.dataset.view !== 'reading') return;
-  syncTocFilter();
+$('#btn-toc').addEventListener('click', () => {
+  if (!document.body.classList.contains('toc-ready')) return;   // запись ещё грузится: оглавление было бы от прежней
   openOverlay($('#toc'));
   fillPageRanges();
 });
+// название раздела в шапке — тоже вход в оглавление: его видно, а значок среди семи других легко не заметить
+$('#chapter-title').addEventListener('click', () => {
+  if (!book || !document.body.classList.contains('toc-ready')) return;
+  openOverlay($('#toc'));
+  fillPageRanges();
+});
+/* Высота шапки — в переменную --topbar-h. На узком экране в чтении шапка в две строки
+   (значки и название раздела), а при крупном шрифте в браузере или лишнем значке — и в три.
+   Отступ текста и цели переходов (style.css) берут высоту отсюда, а не из подогнанного
+   числа: иначе начало текста и найденный абзац уходят под шапку.
+   Наблюдатель сообщает о новой высоте только к следующему кадру, а прокрутка к сохранённому
+   месту идёт сразу за сменой экрана — поэтому при смене экрана (полка ↔ чтение) меряем сами. */
+function syncTopbar() {
+  document.documentElement.style.setProperty('--topbar-h', $('#topbar').offsetHeight + 'px');
+}
+if (window.ResizeObserver) new ResizeObserver(syncTopbar).observe($('#topbar'));
+window.addEventListener('resize', syncTopbar);
+syncTopbar();
+
 /* ===== автозаполнение браузера — не в наши поля =====
    Браузер, сохранивший для сайта почту (её вводят при входе), сам подставляет её в текстовое
    поле, которое сочтёт «логином», — в том числе в скрытое. Первым пострадало поле поиска на
    полке (полка «пустела», см. renderLibrary), 15.11.2026 — фильтр оглавления: Edge на
    телефоне вписал туда почту, и вместо разделов читатель видел «Глав по запросу "почта" нет»,
    причём у статьи фильтр скрыт, и стереть его было нечем.
-   Правило одно на все свои поля: значение, появившееся в поле БЕЗ фокуса, пришло не от
-   читателя — стираем его и не даём дойти до обработчиков. Читатель вводит только в поле с
-   фокусом (клавиатура, вставка, голос); сам код меняет значение без события input. */
-function guardAutofill(input) {
-  if (!input) return;
-  input.setAttribute('autocomplete', 'off');
-  const чужое = e => {
-    if (document.activeElement === input || !input.value) return;
-    input.value = '';
-    e.stopImmediatePropagation();
-  };
-  // на захвате: срабатывает раньше обработчиков самого поля, они чужого значения не увидят
-  input.addEventListener('input', чужое, true);
-  input.addEventListener('change', чужое, true);
-}
-['#toc-filter', '#search-input', '#clips-q', '#mark-tags', '#mt-prompt-name', '#mt-model'].forEach(sel => guardAutofill($(sel)));
 
-/* Браузер умеет заполнить поле и молча, без события. Поэтому, открывая оглавление, приводим
-   поле к тому, что читатель действительно вводил (tocQuery меняется только набором). */
-function syncTocFilter() {
-  const f = $('#toc-filter');
-  if (f && document.activeElement !== f && f.value.trim() !== tocQuery) f.value = tocQuery;
+   Правило одно на все свои поля: у поля есть СВОЁ значение — то, что набрал читатель, пока
+   поле было в фокусе, или положил сам код. Событие ввода в поле без фокуса пришло не от
+   читателя: возвращаем своё значение и до обработчиков событие не пускаем. Читатель вводит
+   только в поле с фокусом (клавиатура, вставка, голос, выбор из списка).
+
+   ⚠ Судим только `input`, не `change`. `change` приходит, когда читатель УХОДИТ из поля, и
+   фокуса на поле в этот миг уже нет (document.activeElement — body). Первая версия мерила
+   оба события одной меркой и стирала набранное при первом касании мимо поля: запрос поиска,
+   теги пометки, название промпта, модель. Поймано проверкой до выкладки, см. CHANGELOG. */
+const valueProp = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+const ownValue = new WeakMap();   // поле → своё значение
+let foreignFill = null;           // поле, куда только что писал браузер: его `change` тоже не наш
+function guardAutofill(input) {
+  if (!(input instanceof HTMLInputElement) || ownValue.has(input)) return;
+  input.setAttribute('autocomplete', 'off');
+  ownValue.set(input, input.value);
+  /* Код кладёт значение присваиванием (`поле.value = …`) — запоминаем и его как своё.
+     Браузер пишет в поле мимо этого сеттера, поэтому подстановку с набором не спутать. */
+  Object.defineProperty(input, 'value', {
+    configurable: true,
+    get() { return valueProp.get.call(this); },
+    set(v) { valueProp.set.call(this, v); ownValue.set(this, valueProp.get.call(this)); },
+  });
 }
+/* На захвате у документа: раньше обработчиков самого поля, в каком бы порядке их ни вешали
+   (старые браузеры зовут слушателей цели по порядку регистрации, не глядя на захват). */
+document.addEventListener('input', e => {
+  const el = e.target;
+  if (!ownValue.has(el)) return;
+  const сейчас = valueProp.get.call(el);
+  // пустое значение — не подстановка: это читатель стёр поле (крестик у поля поиска)
+  if (document.activeElement === el || !сейчас) { ownValue.set(el, сейчас); return; }
+  valueProp.set.call(el, ownValue.get(el));
+  e.stopImmediatePropagation();
+  foreignFill = el;
+  setTimeout(() => { if (foreignFill === el) foreignFill = null; }, 0);
+}, true);
+// вслед за подстановкой браузер шлёт и `change` (в том же такте) — он тоже не от читателя
+document.addEventListener('change', e => {
+  if (e.target === foreignFill) e.stopImmediatePropagation();
+}, true);
+/* Браузер умеет заполнить поле и молча, без события. Поэтому, показывая панель, приводим её
+   поля к своему значению (зовёт openOverlay). */
+function restoreOwn(root) {
+  for (const el of root.querySelectorAll('input')) {
+    if (ownValue.has(el) && document.activeElement !== el && valueProp.get.call(el) !== ownValue.get(el))
+      valueProp.set.call(el, ownValue.get(el));
+  }
+}
+/* #acc-email здесь нет намеренно: это и есть поле входа, почту в него браузер подставляет
+   по делу. Поле поиска на полке создаётся по нажатию и защищается там же (renderLibrary). */
+['#toc-filter', '#search-input', '#clips-q', '#mark-tags', '#mt-prompt-name', '#mt-model', '#mt-key'].forEach(sel => guardAutofill($(sel)));
 
 if ($('#toc-filter')) {
   let tocTimer = null;
@@ -4559,7 +4804,6 @@ $('#btn-search').addEventListener('click', () => {
   bookChip.classList.toggle('chip-off', !bookId);
   bookChip.textContent = bookId && kindOf(bookEntry) === 'article' ? 'Эта статья' : 'Эта книга';
   setSearchScope(bookId ? 'book' : 'library');
-  if ($('#search-input').value !== searchTyped) $('#search-input').value = searchTyped;   // чужое (автозаполнение) — прочь
   openOverlay($('#search'));
   $('#search-input').focus();
 });
@@ -4572,15 +4816,12 @@ $('#search-scope').querySelectorAll('.chip').forEach(c => c.addEventListener('cl
 /* Поиск идёт по мере набора. Короткая задержка — чтобы не искать на каждую букву быстрого
    набора; «Найти» и Enter ищут сразу, не дожидаясь её. */
 let searchTimer = null;
-let searchTyped = '';   // что в поле поиска ввёл сам читатель (а не подставил браузер)
 $('#search-form').addEventListener('submit', e => {
   e.preventDefault();
   clearTimeout(searchTimer);
-  searchTyped = $('#search-input').value;
   runSearch($('#search-input').value);
 });
 $('#search-input').addEventListener('input', () => {
-  searchTyped = $('#search-input').value;
   clearTimeout(searchTimer);
   searchTimer = setTimeout(() => {
     const q = $('#search-input').value;
@@ -5056,6 +5297,148 @@ function listItem(e) {
    что была бы у книги (миниатюра `thumb`), но маленькая и плоская — без корешка, блика и
    полки: по ней статью узнают, а не разглядывают. Нет обложки — рисованная заглушка,
    как у книг, чтобы карточки ленты были одного роста. */
+/* ===== что читатель уже читал и что для него новое =====
+   Отдельной кнопки «прочитано» нет и заводить её не надо: Литрес ругают как раз за то, что
+   дочитанное приходится помечать руками. Всё выводится из сохранённого места чтения
+   (settings.last): времени в записи нет — не читал (открыл и ушёл — тоже «не читал», см.
+   rememberPosition); дошёл до конца текста — дочитал, и это уже не снимается (doneAt у
+   updateProgress); иначе читает. */
+function readPct(e) {
+  const l = getLast(e.id);
+  if (!l || !l.ts) return null;
+  if (typeof l.pct === 'number') return l.pct;
+  // место сохранено до того, как доля стала писаться и у книг (v85): оценка по номеру главы
+  const глав = e.counts && e.counts.chapters;
+  return глав && Number.isInteger(l.chapter) ? Math.min(READ_DONE - 1, Math.round(l.chapter / глав * 100)) : 0;
+}
+function readState(e) { return stateOf(getLast(e.id)); }
+/* «Новое» — статья вышла не больше NEW_DAYS назад, и читатель её ещё не открывал. Без срока
+   пришедшему впервые новым показалось бы всё, а метка, стоящая на всём, ничего не значит. */
+const NEW_DAYS = 30;
+function isNew(e) {
+  if (!e.date || getLast(e.id)) return false;
+  const вышла = Date.parse(e.date + 'T00:00:00');
+  if (!Number.isFinite(вышла)) return false;
+  const прошло = Date.now() - вышла;
+  return прошло < NEW_DAYS * 86400000 && прошло > -86400000;
+}
+/* Серия: "series": "Название" и "part": N в записи реестра (SPEC 3.6). Сколько в серии
+   частей, считаем сами — по записям с тем же названием. */
+const partOf = e => { const n = Number(e && e.part); return Number.isFinite(n) && n > 0 ? n : null; };
+function seriesOf(e) {
+  if (!e || typeof e.series !== 'string' || !e.series) return null;
+  const все = library.filter(x => x.series === e.series);
+  // читать можно только выложенное; а «из скольких» — по всем частям, считая черновики,
+  // и по старшему номеру: иначе при черновике посередине вышло бы «часть 3 из 2»
+  const parts = все.filter(x => !x.draft).sort((a, b) => (partOf(a) || 0) - (partOf(b) || 0));
+  return { name: e.series, part: partOf(e), of: Math.max(все.length, ...все.map(x => partOf(x) || 0)), parts };
+}
+function seriesLabel(e) {
+  const с = seriesOf(e);
+  // серия из одной записи — ещё не серия: «часть 1 из 1» только смущает
+  return с && с.part != null && с.of > 1 ? `часть ${с.part} из ${с.of}` : '';
+}
+const minutesOf = e => { const слов = e && e.counts && e.counts.words; return слов ? Math.max(1, Math.round(слов / READ_WPM)) : null; };
+
+/* Чипы над списком — отбор в одно касание: что не читал, что читаю, что покороче. Намеренно
+   не в settings, как и запрос на полке: отбор, переживший перезапуск, выглядит как
+   «библиотека опустела». */
+let shelfStatus = 'all';   // all | none | reading | done
+let shelfLen = 'any';      // any | short | long — только у статей
+const LEN_SHORT = 15, LEN_LONG = 30;   // минуты чтения
+let shelfChipsOf = null;   // вкладка, на которой выбраны чипы: на другой они не действуют
+const lenIs = (e, id) => { const мин = minutesOf(e); return мин != null && (id === 'short' ? мин <= LEN_SHORT : мин >= LEN_LONG); };
+const statusOk = e => shelfStatus === 'all' || readState(e) === shelfStatus;
+const lenOk = e => shelfLen === 'any' || lenIs(e, shelfLen);
+const entryMatchesChips = e => statusOk(e) && lenOk(e);
+function chipEl(имя, активен, нажали, n) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.dataset.chip = имя;
+  b.className = 'chip' + (активен ? ' active' : '');
+  b.setAttribute('aria-pressed', String(активен));
+  b.textContent = имя;
+  if (n != null) { const с = document.createElement('span'); с.className = 'chip-n'; с.textContent = n; b.appendChild(с); }
+  b.addEventListener('click', нажали);
+  return b;
+}
+
+// тонкая полоса прочитанного: карточка «Продолжить», начатая статья в ленте
+function readBar(pct) {
+  const bar = document.createElement('span');
+  bar.className = 'read-bar';
+  const fill = document.createElement('i');
+  fill.style.width = Math.max(3, Math.min(100, pct || 0)) + '%';   // и нулевую долю видно
+  bar.appendChild(fill);
+  return bar;
+}
+
+/* Ряд «Продолжить»: всё начатое и не дочитанное, свежее — первым. Была одна строка с
+   последней записью; читают же обычно две-три вещи разом, и вторая терялась в полке. */
+const CONT_MAX = 8;
+function continueRow(начатые, open) {
+  const box = document.createElement('section');
+  box.className = 'cont';
+  const h = document.createElement('div');
+  h.className = 'cont-h';
+  h.append(svgIco('play'), ' Продолжить');
+  box.appendChild(h);
+  const row = document.createElement('div');
+  row.className = 'cont-row';
+  for (const { e, l } of начатые) {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'cont-card';
+    const thumb = document.createElement('span');
+    thumb.className = 'cont-thumb';
+    coverInto(thumb, e, '');
+    const main = document.createElement('span');
+    main.className = 'cont-main';
+    const title = document.createElement('span');
+    title.className = 'cont-title';
+    title.dir = 'auto';   // арабское название обрезалось бы с начала, а не с конца
+    setTextSlw(title, entryLabel(e));
+    const pct = Math.max(0, Math.min(100, readPct(e) || 0));
+    const meta = document.createElement('span');
+    meta.className = 'cont-meta';
+    // книги и статьи здесь вперемешку — подпись типа говорит, что именно продолжаем
+    meta.textContent = (kindOf(e) === 'article' ? 'Статья' : 'Книга') + ' · ' + (l.page != null ? `стр. ${l.page}` : `${pct}%`);
+    main.append(title, readBar(pct), meta);
+    card.append(thumb, main);
+    card.addEventListener('click', open(e));
+    row.appendChild(card);
+  }
+  box.appendChild(row);
+  return box;
+}
+
+/* «Начните отсюда» — записи, которые закрепил автор ("pinned": порядок, в реестре). Когда
+   статей сотни, свежие сверху — не ответ на вопрос «с чего начать». */
+function pinnedBlock(закреп) {
+  const box = document.createElement('section');
+  box.className = 'pinned';
+  const h = document.createElement('div');
+  h.className = 'pinned-h';
+  h.append(svgIco('pin'), ' Начните отсюда');
+  box.appendChild(h);
+  for (const e of закреп) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'pinned-item';
+    const t = document.createElement('span');
+    t.className = 'pinned-title';
+    t.dir = 'auto';
+    setTextSlw(t, entryLabel(e));
+    const m = document.createElement('span');
+    m.className = 'pinned-meta';
+    m.textContent = [seriesLabel(e), kindOf(e) === 'article' ? readTime(e) : ''].filter(Boolean).join(' · ');
+    b.append(t, m);
+    b.addEventListener('click', () => openEntry(e));
+    box.appendChild(b);
+  }
+  return box;
+}
+
 function articleItem(e) {
   const card = document.createElement('button');
   card.type = 'button';
@@ -5069,6 +5452,12 @@ function articleItem(e) {
   const title = document.createElement('span');
   title.className = 'art-card-title';
   setTextSlw(title, entryLabel(e));
+  if (isNew(e)) {
+    const новое = document.createElement('span');
+    новое.className = 'new-tag';
+    новое.textContent = 'Новое';
+    title.append(' ', новое);
+  }
   main.appendChild(title);
   const аннотация = plainOf(e.description);
   if (аннотация) {
@@ -5081,14 +5470,15 @@ function articleItem(e) {
   const meta = document.createElement('span');
   meta.className = 'art-meta';
   const path = bookCatPath(e);
-  const биты = [path.length ? path[path.length - 1] : '', readTime(e), entryDate(e)].filter(Boolean);
+  const биты = [seriesLabel(e), path.length ? path[path.length - 1] : '', readTime(e), entryDate(e)].filter(Boolean);
   if (биты.length) { const t = document.createElement('span'); t.textContent = биты.join(' · '); meta.appendChild(t); }
   // начатая и дочитанная статья — как «стр. N» на обложке начатой книги
-  const l = getLast(e.id);
-  if (l && l.pct != null && l.pct > 2) {
+  const состояние = readState(e);
+  const доля = readPct(e) || 0;
+  if (состояние !== 'none') {
     const r = document.createElement('span');
     r.className = 'art-read';
-    r.textContent = l.pct >= 97 ? 'прочитано' : `читаю · ${l.pct}%`;
+    r.textContent = состояние === 'done' ? 'прочитано' : `читаю · ${доля}%`;
     meta.appendChild(r);
   }
   const status = document.createElement('span');
@@ -5096,6 +5486,9 @@ function articleItem(e) {
   applyBadges(status, e, false);
   if (status.childNodes.length) meta.appendChild(status);
   main.appendChild(meta);
+  // начатую видно по полосе, дочитанная уходит в тень: глаз идёт к тому, что ещё не читал
+  if (состояние === 'reading') main.appendChild(readBar(доля));
+  if (состояние === 'done') card.classList.add('is-read');
 
   card.append(thumb, main);
   card.addEventListener('click', () => openEntry(e));
@@ -5139,7 +5532,7 @@ let onShelf = false;       // на экране полка — не книга �
 let shelfDrawn = 0;        // сколько записей сейчас отрисовано (досыпка идёт порциями)
 let shelfReturn = null;    // { y, n, sig }
 const SHELF_RESTORE_MAX = 600;   // больше разом не рисуем даже ради возврата (см. про 3000 книг ниже)
-const shelfSig = () => JSON.stringify([shelfKind(), settings.shelfCat, settings.shelfFacets, shelfQuery, shelfSort(), settings.shelfView]);
+const shelfSig = () => JSON.stringify([shelfKind(), settings.shelfCat, settings.shelfFacets, shelfQuery, shelfSort(), settings.shelfView, shelfStatus, shelfLen]);
 function leaveShelf() {
   if (onShelf) shelfReturn = { y: window.scrollY, n: shelfDrawn, sig: shelfSig() };
   onShelf = false;
@@ -5224,6 +5617,7 @@ function renderLibrary(opts = {}) {
   if (вернуть && вернуть.n > SHELF_RESTORE_MAX) вернуть = null;
   if (!$('#comic').hidden) { $('#comic').hidden = true; document.body.classList.remove('comic-open'); }
   document.body.dataset.view = 'library';
+  syncTopbar();
   if (mtModeOn()) setMtMode(false);   // режим перевода живёт только внутри книги
   book = null;
   leaveReading();
@@ -5235,27 +5629,11 @@ function renderLibrary(opts = {}) {
 
   renderTree(); // боковое дерево навигации (в #cat-tree)
 
-  // строка «Продолжить» — тонкая, только при сохранённой позиции (стр./сектор)
-  let recent = null;
-  for (const e of library) {
-    const l = getLast(e.id);
-    if (l && l.ts && (l.page != null || l.sector) && (!recent || l.ts > recent.ts)) recent = { entry: e, ts: l.ts, page: l.page };
-  }
-  if (recent) {
-    const line = document.createElement('button');
-    line.type = 'button'; line.className = 'continue-line';
-    const ico = document.createElement('span'); ico.className = 'cl-ico'; ico.appendChild(svgIco('play'));
-    const t = document.createElement('span'); t.className = 'cl-text';
-    // книги и статьи здесь вперемешку — подпись типа говорит, что именно продолжаем
-    t.append(entryLabel(recent.entry));
-    const тип = document.createElement('span'); тип.className = 'kind-tag'; тип.textContent = kindLabel(recent.entry);
-    t.append(' ', тип);
-    if (recent.page != null) t.append(` · стр. ${recent.page}`);
-    const arr = document.createElement('span'); arr.className = 'cl-arrow'; arr.textContent = '›';
-    line.append(ico, t, arr);
-    line.addEventListener('click', open(recent.entry));
-    stream.appendChild(line);
-  }
+  // ряд «Продолжить»: начатое и не дочитанное, свежее — первым
+  const начатые = [];
+  for (const e of library) if (readState(e) === 'reading') начатые.push({ e, l: getLast(e.id) });
+  начатые.sort((a, b) => b.l.ts - a.l.ts);
+  if (начатые.length) stream.appendChild(continueRow(начатые.slice(0, CONT_MAX), open));
 
   // ── классификатор: дерево категорий + фасеты (по полям записи index.json) ──
   const cat = Array.isArray(settings.shelfCat) ? settings.shelfCat : (settings.shelfCat = []);
@@ -5264,6 +5642,10 @@ function renderLibrary(opts = {}) {
      только отбирает, что показывать и в каком виде. Библиотека из записей одного типа
      (например, чья-то копия без статей) вкладок не получает: выбирать не из чего. */
   const вид = shelfKind();
+  /* Чипы — про список одной вкладки. На другую попадают не только её кнопкой: подсказка
+     «Во вкладке … — N», возврат из записи другого типа. Отбор, пришедший следом, показал бы
+     там пустой список рядом с найденным. */
+  if (shelfChipsOf !== вид) { shelfStatus = 'all'; shelfLen = 'any'; shelfChipsOf = вид; }
   const типы = KINDS.filter(k => library.some(e => kindOf(e) === k.id));
   if (типы.length > 1) {
     const tabs = document.createElement('div');
@@ -5289,8 +5671,28 @@ function renderLibrary(opts = {}) {
     stream.appendChild(tabs);
   }
 
+  /* Разделы чипами — для узкого экрана, где дерево разделов спрятано в меню (на широком оно
+     стоит колонкой слева, и чипы скрыты стилем). Только верхний уровень и только разделы,
+     где в этой вкладке что-то есть; глубже — по-прежнему через дерево. */
+  const корни = taxNodes.filter(n => !n.parent)
+    .map(n => ({ n, сколько: library.filter(e => kindOf(e) === вид && bookCatPath(e)[0] === n.name).length }))
+    .filter(x => x.сколько);
+  if (корни.length > 1) {
+    const sec = document.createElement('div');
+    sec.className = 'sec-chips';
+    for (const { n, сколько } of корни) {
+      const тут = cat[0] === n.name;              // выбран этот раздел или что-то в его глубине
+      const ровно = тут && cat.length === 1;
+      sec.appendChild(chipEl(n.name, тут, () => {
+        // выбран сам раздел — снять отбор; выбран подраздел — подняться к разделу
+        settings.shelfCat = ровно ? [] : [n.name]; saveSettings(); renderLibrary();
+      }, сколько));
+    }
+    stream.appendChild(sec);
+  }
+
   const panel = document.createElement('div');
-  panel.className = 'classifier';
+  panel.className = 'classifier' + (cat.length ? '' : ' at-root');
 
   // хлебные крошки по выбранному пути дерева
   const crumbs = document.createElement('div');
@@ -5358,6 +5760,7 @@ function renderLibrary(opts = {}) {
     q.spellcheck = false;
     q.setAttribute('enterkeyhint', 'search');
     q.setAttribute('aria-label', 'Поиск по полке');
+    guardAutofill(q);   // запрос пережил перерисовку — поле стоит в разметке сразу, без нажатия
     q.addEventListener('input', () => {
       shelfQuery = q.value.trim();
       clearTimeout(qTimer);
@@ -5425,13 +5828,19 @@ function renderLibrary(opts = {}) {
   stream.appendChild(bar);
   updateFilterBadge();
 
+  const chipsRow = document.createElement('div');
+  chipsRow.className = 'shelf-chips';
+  stream.appendChild(chipsRow);
+
   const body = document.createElement('div');
   body.className = 'shelf-body';
   stream.appendChild(body);
 
   const paint = (минимум = 0) => {
-    const shown = sortShelf(underCat.filter(e =>
-      entryMatchesFacets(e, facets) && entryMatchesQuery(e, shelfQuery)), shelfSort(вид));
+    // всё, кроме чипов: раздел, фильтры, запрос — от этого списка считаются и числа на чипах
+    const основа = underCat.filter(e => entryMatchesFacets(e, facets) && entryMatchesQuery(e, shelfQuery));
+    drawChips(основа);
+    const shown = sortShelf(основа.filter(entryMatchesChips), shelfSort(вид));
     // «показано из скольких» — иначе непонятно, фильтр отсёк или книг столько и есть
     count.textContent = shown.length === underCat.length
       ? `${underCat.length}`
@@ -5442,7 +5851,8 @@ function renderLibrary(opts = {}) {
        сколько нашлось там, и ведём туда с тем же запросом. */
     if (shelfQuery) for (const k of типы) {
       if (k.id === вид) continue;
-      const там = library.filter(e => kindOf(e) === k.id && entryInCat(e, cat) && entryMatchesQuery(e, shelfQuery)).length;
+      const там = library.filter(e => kindOf(e) === k.id && entryInCat(e, cat)
+        && entryMatchesFacets(e, facets) && entryMatchesQuery(e, shelfQuery)).length;
       if (!там) continue;
       const b = document.createElement('button');
       b.type = 'button';
@@ -5450,6 +5860,12 @@ function renderLibrary(opts = {}) {
       b.textContent = `Во вкладке «${k.tab}» по этому запросу — ${там} ›`;
       b.addEventListener('click', () => { settings.shelfKind = k.id; saveSettings(); renderLibrary(); });
       body.appendChild(b);
+    }
+    // «Начните отсюда» — только над полным списком: под отбором и поиском оно мешало бы
+    if (!shelfQuery && shelfStatus === 'all' && shelfLen === 'any' && !activeFilterCount()) {
+      const закреп = underCat.filter(e => e.pinned)
+        .sort((a, b) => (Number(a.pinned) || 0) - (Number(b.pinned) || 0));
+      if (закреп.length) body.appendChild(pinnedBlock(закреп));
     }
     if (!shown.length) {
       const m = document.createElement('div');
@@ -5466,6 +5882,51 @@ function renderLibrary(opts = {}) {
     saveSettings();
     paint();
   });
+
+  /* Чипы. Показываем только те, что действительно отбирают: чип, под которым пусто или весь
+     список, лишь занимает место (у пришедшего впервые «Не читал» — это всё, остальное —
+     ничего, и ряда нет вовсе). Число на чипе — сколько записей окажется в списке по нажатию:
+     считается по тому же списку, что и сам список (раздел, фильтры, запрос), с учётом
+     соседней группы чипов и без своей — как счётчики в панели фильтров. Поэтому ряд
+     перерисовывается вместе со списком (зовёт paint). */
+  const drawChips = основа => {
+    const фокус = chipsRow.contains(document.activeElement) ? document.activeElement : null;
+    chipsRow.innerHTML = '';
+    const есть = [];
+    const поДлине = основа.filter(lenOk), поСостоянию = основа.filter(statusOk);
+    for (const [id, имя] of [['none', 'Не читал'], ['reading', 'Читаю'], ['done', 'Прочитано']]) {
+      const n = поДлине.filter(e => readState(e) === id).length;
+      if ((n && n < поДлине.length) || shelfStatus === id) есть.push({ что: 'status', id, имя, n });
+    }
+    if (вид === 'article') for (const [id, имя] of [['short', 'Короткие'], ['long', 'Длинные']]) {
+      const n = поСостоянию.filter(e => lenIs(e, id)).length;
+      if ((n && n < поСостоянию.length) || shelfLen === id) есть.push({ что: 'len', id, имя, n });
+    }
+    chipsRow.hidden = !есть.length;
+    /* «Фильтры» стоят первыми в ряду чипов: и то и другое — отбор, а панель полки без этой
+       кнопки умещается на телефоне в одну строку. Чипов нет — кнопка остаётся в панели. */
+    if (!есть.length) {
+      if (filt.parentNode !== bar) bar.insertBefore(filt, count);
+      if (фокус === filt) filt.focus({ preventScroll: true });
+      return;
+    }
+    chipsRow.appendChild(filt);
+    chipsRow.appendChild(chipEl('Все', shelfStatus === 'all' && shelfLen === 'any', () => {
+      shelfStatus = 'all'; shelfLen = 'any'; paint();
+    }));
+    for (const ч of есть) {
+      const активен = ч.что === 'status' ? shelfStatus === ч.id : shelfLen === ч.id;
+      chipsRow.appendChild(chipEl(ч.имя, активен, () => {
+        // повторное нажатие снимает отбор — отдельной кнопки «сбросить» не нужно
+        if (ч.что === 'status') shelfStatus = активен ? 'all' : ч.id;
+        else shelfLen = активен ? 'any' : ч.id;
+        paint();
+      }, ч.n));
+    }
+    // ряд пересоздан — фокус с клавиатуры возвращаем туда же
+    if (фокус === filt) filt.focus({ preventScroll: true });
+    else if (фокус) for (const b of chipsRow.querySelectorAll('.chip')) if (b.dataset.chip === фокус.dataset.chip) { b.focus({ preventScroll: true }); break; }
+  };
   paint(вернуть ? вернуть.n : 0);
   // подпись внизу полки (почта — только в «О приложении», не на главной)
   const brand = document.createElement('div');
@@ -5484,6 +5945,7 @@ function renderLibrary(opts = {}) {
 async function renderBookInfo(entry) {
   leaveShelf();
   document.body.dataset.view = 'library';
+  syncTopbar();
   if (mtModeOn()) setMtMode(false);
   book = null;
   leaveReading();
@@ -5618,7 +6080,8 @@ function leaveReading() {
      книги из общего списка пыталась прокрутить текст, которого на экране нет. */
   bookId = null;
   bookEntry = null;
-  document.body.classList.remove('single-page');
+  streamOf = null;
+  document.body.classList.remove('single-page', 'toc-ready');
 }
 
 async function openBook(entry, opts = {}) {
@@ -5632,6 +6095,7 @@ async function openBook(entry, opts = {}) {
   staleChapters.clear();
   comicCache.clear();
   document.body.dataset.view = 'reading';
+  syncTopbar();
   $('#chapter-title').textContent = 'Загрузка…';
   try {
     book = JSON.parse(await fetchBookText(base + 'book.json'));
@@ -5663,6 +6127,7 @@ async function openBook(entry, opts = {}) {
   loadGlossary();      // не ждём: кнопки терминов рисуются и без него, словарь догоняет
   document.title = pickTitle(book.title);
   buildToc();
+  document.body.classList.add('toc-ready');   // оглавление — уже этой записи: название в шапке ведёт в него
   buildMarkPanel();
   // переход из поиска по библиотеке: открыть нужную главу и подсветить попадание
   if (opts.hit) { pendingHit = opts.hit; await loadChapter(opts.hit.ci, opts.hit.id); return; }
@@ -5685,7 +6150,7 @@ async function openBook(entry, opts = {}) {
   const last = getLast(bookId);
   // дочитанную статью открываем сначала: возвращаться в её конец незачем, а кнопки
   // «Сначала» у статьи нет — она без карточки
-  if (singlePage && last && last.pct >= 97) { await loadChapter(0); return; }
+  if (singlePage && last && last.pct >= READ_DONE) { await loadChapter(0); return; }
   const ci = last && Number.isInteger(last.chapter) ? last.chapter : 0;
   await loadChapter(Math.min(Math.max(ci, 0), book.chapters.length - 1), last ? last.sector : null);
   if (book.view === 'comic') openComic(chapterIndex, last && last.chapter === chapterIndex ? last.frame || 0 : 0);
