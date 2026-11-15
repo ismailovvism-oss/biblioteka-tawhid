@@ -10,7 +10,13 @@
  *
  * Кто использует:
  *   - `tools/import-tam.js`      (Node)     — адаптеры внешних источников;
- *   - Вычитка, «Опубликовать в библиотеку» (браузер) — путь авторства.
+ *   - Вычитка, «Опубликовать в библиотеку» (браузер) — путь авторства;
+ *   - `tools/gen-meta.js`        (Node)     — сведения для полки (раздел в конце файла).
+ *
+ * Канон — в репозитории библиотеки, у Вычитки ВЕНДОРЕННАЯ копия. Правки вносить здесь,
+ * копию обновлять целиком. 15.11.2026 копии оказались разными: в Вычитке её правили на
+ * месте (метка vychitka-reviewed, склейка частей одной закреплённой пары), и обычное
+ * `cp` из канона молча стёрло бы эти правки. Сведено; перед `cp` сверять `diff`.
  * Раньше эта логика была написана в обоих местах отдельно и успела молча
  * разойтись (в Вычитке появились якоря-гибрид, в импортёре — счётчики и
  * предупреждения). Здесь их объединение — правим только тут.
@@ -102,6 +108,8 @@ function parseBody(body) {
     // сохраняем его, чтобы цитаты ar/ru парились по этому ID, а не по перенумерации
     const sm = l.trim().match(SECTOR_RE);
     if (sm) { flush(); pendingId = sm[1].toLowerCase(); continue; }
+    // Отметка вычитки служебная: в опубликованный текст не попадает.
+    if (/^<!--\s*vychitka-reviewed(?:\s+s\d+)?\s+[a-f0-9]+\s*-->$/.test(l.trim())) { flush(); continue; }
     const hm = l.match(/^(#{1,6})\s+(.*)$/);
     // Заголовок — самостоятельный, тут же закрытый блок. Сектором он НЕ становится
     // (см. convert): прицепляется к следующему текст-сектору как часть того же sNNN,
@@ -190,7 +198,14 @@ function convert(body, { dropArabic = false, label = '' } = {}) {
     }
     const page = (b.page != null) ? b.page : pendingPage;
     pendingPage = null;
-    sectors.push({ page, parts: [...pendingHeads, renderTextLines(b)], id: b.id || null });
+    const parts = [...pendingHeads, renderTextLines(b)];
+    const previous = sectors[sectors.length - 1];
+    // Части одной закреплённой пары остаются одним сектором. При экспорте
+    // суффиксы назначаются заново, поэтому заголовки не создают дубликаты ID.
+    if (b.id && previous && previous.id === b.id) {
+      if (page != null) parts[0].unshift(`<!-- p${page} -->`);
+      previous.parts.push(...parts);
+    } else sectors.push({ page, parts, id: b.id || null });
     pendingHeads = [];
   }
   // заголовки без последующего текста — доп. части последнего сектора (не новый сектор)
@@ -265,7 +280,125 @@ function parityHint(orig, trans) {
   return null;
 }
 
+/* ───────────────────────── Сведения для полки ─────────────────────────
+ *
+ * То, что издатель кладёт в запись реестра (books/index.json) помимо текста: число глав
+ * и слов (из слов читалка выводит время чтения), у статьи — копию аннотации, а для новой
+ * записи — догадку, книга это или статья (SPEC 3.6).
+ *
+ * Издателей три, а счёт один — этот:
+ *   - `tools/gen-meta.js` (Node) — пересчёт по папке книги; его же зовут `tools/doctor.js`,
+ *     `tools/private-index.js` и конвертер статей `~/projects/tools/statya/в-читалку.py`;
+ *   - Вычитка, «Опубликовать в библиотеку» (браузер) — считает то, что сама записала.
+ * Разойдись счёт хоть на слово — `doctor.js` объявит запись, опубликованную из Вычитки,
+ * устаревшей. Поэтому второго счётчика не заводить.
+ *
+ * Считаем по ТЕКСТУ Контракта, а не по отрисованной странице: число слов не должно
+ * зависеть от разметки, которую читалка рисует вокруг текста (подпись врезки, кнопки
+ * листалки). Иначе правка отрисовки объявила бы устаревшей всю библиотеку разом.
+ */
+
+const READ_WPM = 200;            // слов в минуту; то же число — READ_WPM в app.js читалки
+const ARTICLE_MAX_WORDS = 15000; // до ~75 минут чтения запись без частей похожа на статью
+
+/* Слово — цепочка букв и цифр; дефис и апостроф внутри слова его не рвут («что-то»,
+   «ma’mūm»). Арабские огласовки — комбинируемые знаки (\p{M}): без них огласованное
+   слово рассыпалось бы на куски. */
+const WORD_RE = /[\p{L}\p{N}][\p{L}\p{N}\p{M}]*(?:[-'’ʼ][\p{L}\p{N}][\p{L}\p{N}\p{M}]*)*/gu;
+
+/*
+ * Строки основного текста одного файла главы в Контракте: только текст-секторы.
+ * Границы сектора — зеркало parseFile из parser.js (держать в синхроне): сектор открывает
+ * <!-- sNNN -->, закрывает пустая строка (вне ограды ```), маркер страницы или региона
+ * заметок; сноска <!-- fnN --> идёт до следующего якоря; текст вне якорей не читается.
+ */
+function mainLines(md) {
+  const out = [];
+  let cur = null;        // 'text' | 'fn' | null
+  let inNote = false;    // <!-- note --> … <!-- /note --> — личные заметки, не публикуются
+  let inFence = false;
+  for (const raw of String(md || '').split(/\r?\n/)) {
+    const line = raw.trim();
+    if (/^<!--\s*note\s*-->$/i.test(line)) { cur = null; inNote = true; continue; }
+    if (/^<!--\s*\/\s*note\s*-->$/i.test(line)) { inNote = false; continue; }
+    if (inNote) continue;
+    if (/^<!--\s*p\d+\s*-->$/.test(line)) { cur = null; continue; }
+    if (/^<!--\s*s\d+[a-z]?\s*-->$/.test(line)) { cur = 'text'; inFence = false; continue; }
+    if (/^<!--\s*fn\d+\s*-->$/.test(line)) { cur = 'fn'; inFence = false; continue; }
+    if (!cur) continue;
+    if (/^```/.test(line)) inFence = !inFence;
+    if (line === '' && !inFence) { if (cur === 'text') cur = null; continue; }
+    if (cur === 'text') out.push(line);
+  }
+  return out;
+}
+
+/* Слова основного текста главы. Не слова: номер пункта списка и сноски, адрес картинки
+   и ссылки, тип врезки, теги. Подпись картинки и текст ссылки — слова: их читают. */
+function countWords(md) {
+  let n = 0;
+  for (const line of mainLines(md)) {
+    const text = line
+      .replace(/^(?:>\s?)*\d+\.\s+/, ' ')                 // «1. » пункта списка, и внутри цитаты
+      .replace(/!?\[([^\]\n]*)\]\([^)\s]*\)/g, ' $1 ')   // ![подпись](путь), [текст](адрес)
+      .replace(/\[\^[^\]\s]+\]/g, ' ')                    // [^12]
+      .replace(/\[![\w-]+\][+-]?/g, ' ')                  // > [!note]- Заголовок
+      .replace(/<[^>]*>/g, ' ');                          // <u>…</u>, комментарии
+    n += (text.match(WORD_RE) || []).length;
+  }
+  return n;
+}
+
+// язык, на котором запись читают в русском интерфейсе: русский, иначе последний язык книги
+function readingLang(manifest) {
+  const langs = (manifest && manifest.languages) || [];
+  return langs.includes('ru') ? 'ru' : langs[langs.length - 1];
+}
+
+/*
+ * Число глав с текстом и слов основного текста.
+ * texts — { "<файл главы>": "<текст файла на языке readingLang(manifest)>" }; нет файла —
+ * нет ключа (или пустая строка). Чтение файлов — дело вызывающей стороны: у Node это fs,
+ * у Вычитки — папка, выбранная в браузере.
+ */
+function shelfCounts(manifest, texts) {
+  let chapters = 0, words = 0;
+  for (const ch of (manifest && manifest.chapters) || []) {
+    if (!ch.file) continue;                       // запись-группа: читать нечего
+    chapters++;
+    words += countWords(texts && texts[ch.file]);
+  }
+  return { chapters, words };
+}
+
+/* Что должно стоять в записи реестра: счёт, а у статьи — ещё и копия аннотации из
+   манифеста (источник истины — book.json; в реестре копия, чтобы лента не тянула
+   манифест каждой записи ради карточки). */
+function shelfMeta(entry, manifest, texts) {
+  const out = { counts: shelfCounts(manifest, texts) };
+  if (entry && entry.kind === 'article' && manifest && manifest.description) out.description = manifest.description;
+  return out;
+}
+
+const readMinutes = words => Math.max(1, Math.round((words || 0) / READ_WPM));
+
+/*
+ * Догадка для НОВОЙ записи: книга или статья. Статья отвечает на один вопрос и читается
+ * в один присест — значит, без деления на части (записей-групп в оглавлении нет) и не
+ * длиннее ARTICLE_MAX_WORDS. Это только значение по умолчанию в форме публикации: выбор
+ * автора важнее, а у уже опубликованной записи тип берётся из реестра, не отсюда.
+ */
+function guessKind(manifest, counts) {
+  const chapters = (manifest && manifest.chapters) || [];
+  if (chapters.some(ch => ch.header || !ch.file)) return 'book';
+  const words = (counts && counts.words) || 0;
+  return words > 0 && words <= ARTICLE_MAX_WORDS ? 'article' : 'book';
+}
+
 // Node — require; браузер — глобал window.Contract (см. шапку: файл двусредный)
-const API = { parseBody, convert, parityHint, delinkWiki, isArabicLine, numberFootnotes, stripFrontmatter, renumber };
+const API = {
+  parseBody, convert, parityHint, delinkWiki, isArabicLine, numberFootnotes, stripFrontmatter, renumber,
+  mainLines, countWords, readingLang, shelfCounts, shelfMeta, readMinutes, guessKind, READ_WPM, ARTICLE_MAX_WORDS,
+};
 if (typeof module !== 'undefined' && module.exports) module.exports = API;
 else if (typeof window !== 'undefined') window.Contract = API;

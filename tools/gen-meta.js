@@ -23,55 +23,34 @@
  * Запускать после добавления записи и после правки текста или аннотации. Забыли —
  * tools/doctor.js скажет, что сведения устарели.
  *
- * Счёт слов общий с doctor.js и private-index.js (экспорт ниже): три счётчика, написанные
- * порознь, разошлись бы на первой же правке.
+ * Сам счёт — в contract.js (shelfCounts, shelfMeta): им же пользуется Вычитка, когда
+ * публикует запись, поэтому второго счётчика здесь нет. Этот файл только читает папку
+ * книги с диска и отдаёт тексты ядру; через него считают doctor.js, private-index.js и
+ * конвертер статей в-читалку.py.
  */
 
 const fs = require('fs');
 const path = require('path');
-const { buildChapter } = require('../parser.js');
+const Contract = require('../contract.js');
 
 const КОРЕНЬ = path.join(__dirname, '..');
 const РЕЕСТР = path.join(КОРЕНЬ, 'books', 'index.json');
 
-/* Слово — цепочка букв и цифр; дефис и апостроф внутри слова его не рвут
-   («что-то», «ma’mūm»). Арабские огласовки — комбинируемые знаки (\p{M}), без них
-   огласованное слово рассыпалось бы на куски. */
-const СЛОВО = /[\p{L}\p{N}][\p{L}\p{N}\p{M}]*(?:[-'’ʼ][\p{L}\p{N}][\p{L}\p{N}\p{M}]*)*/gu;
-
-function словВHtml(html) {
-  const текст = String(html)
-    .replace(/<button class="fnref"[^>]*>.*?<\/button>/g, ' ')   // номер сноски — не слово
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&[a-z#0-9]+;/gi, ' ');
-  return (текст.match(СЛОВО) || []).length;
-}
-
-// язык, на котором запись читают в русском интерфейсе
-function языкЧтения(манифест) {
-  const языки = манифест.languages || [];
-  return языки.includes('ru') ? 'ru' : языки[языки.length - 1];
+/* Тексты глав на языке чтения: { "<файл главы>": "<текст>" }. Нет файла — нет ключа. */
+function тексты(папка, манифест) {
+  const язык = Contract.readingLang(манифест);
+  const out = {};
+  for (const гл of манифест.chapters || []) {
+    if (!гл.file || !язык) continue;
+    const п = path.join(папка, язык, гл.file);
+    if (fs.existsSync(п)) out[гл.file] = fs.readFileSync(п, 'utf8');
+  }
+  return out;
 }
 
 /** Число глав с текстом и слов основного текста. Сноски в счёт слов не идут. */
 function посчитать(папка, манифест) {
-  const языки = манифест.languages || [];
-  const язык = языкЧтения(манифест);
-  let глав = 0, слов = 0;
-  for (const гл of манифест.chapters || []) {
-    if (!гл.file) continue;                       // запись-группа: читать нечего
-    глав++;
-    const тексты = {};
-    for (const l of языки) {
-      const п = path.join(папка, l, гл.file);
-      тексты[l] = fs.existsSync(п) ? fs.readFileSync(п, 'utf8') : '';
-    }
-    for (const пара of buildChapter(тексты, языки).pairs) {
-      if (пара.type !== 'text' || пара[язык] == null) continue;
-      слов += словВHtml(пара[язык]);
-    }
-  }
-  return { chapters: глав, words: слов };
+  return Contract.shelfCounts(манифест, тексты(папка, манифест));
 }
 
 /** Что должно стоять в записи реестра. null — папки или манифеста нет, судить не о чем. */
@@ -82,9 +61,7 @@ function сведения(запись, корень = КОРЕНЬ) {
   if (!fs.existsSync(манифестП)) return null;
   let манифест;
   try { манифест = JSON.parse(fs.readFileSync(манифестП, 'utf8')); } catch { return null; }
-  const out = { counts: посчитать(папка, манифест) };
-  if (запись.kind === 'article' && манифест.description) out.description = манифест.description;
-  return out;
+  return Contract.shelfMeta(запись, манифест, тексты(папка, манифест));
 }
 
 const одинаковы = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -104,7 +81,7 @@ if (require.main === module) {
     if (!одинаковы(з.counts, с.counts)) { з.counts = с.counts; тронуто = true; }
     if (с.description !== undefined && !одинаковы(з.description, с.description)) { з.description = с.description; тронуто = true; }
     if (тронуто) изменено++;
-    const мин = Math.max(1, Math.round(с.counts.words / 200));
+    const мин = Contract.readMinutes(с.counts.words);
     console.log(`  · ${з.id}: глав ${с.counts.chapters}, слов ${с.counts.words}` +
       (з.kind === 'article' ? `, читать ~${мин} мин` : '') + (тронуто ? '  ← обновлено' : ''));
   }
