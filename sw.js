@@ -37,7 +37,7 @@
  * SHELL_CHECK_EVERY сверяем оболочку с сервером), но это страховка, а не порядок.
  */
 
-const VERSION = 'chitalka-v86';
+const VERSION = 'chitalka-v87';
 const SHELL_CACHE = VERSION.replace('chitalka-', 'chitalka-shell-');
 const CONTENT_CACHE = 'chitalka-content-v1';   // переживает смену версии оболочки
 const FONT_CACHE = 'chitalka-fonts-v1';

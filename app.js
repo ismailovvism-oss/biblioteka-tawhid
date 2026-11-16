@@ -478,6 +478,7 @@ function articleHead() {
   }
   const info = document.createElement('div');
   info.className = 'art-info';
+  if (isBrief(e)) info.appendChild(briefTag());
   const биты = [entryDate(e, true), readTime(e)].filter(Boolean);
   if (биты.length) { const t = document.createElement('span'); t.textContent = биты.join(' · '); info.appendChild(t); }
   // одобрение и «в работе»; «Готово» здесь не пишем: выложенная статья готова по умолчанию
@@ -5005,8 +5006,21 @@ function readTime(e) {
 /* Подпись типа для общих мест (поиск по библиотеке, «Продолжить», вырезки), где книги и
    статьи стоят вперемешку: «Статья · 14 мин», «Книга · 37 глав». Нет счётчиков в реестре
    (внешняя или только что добавленная запись) — просто «Статья» или «Книга». */
+/* Краткий ответ (16.11.2026) — статья с жанром «Краткий ответ»: готовый развёрнутый ответ на
+   один вопрос, на 1–3 экрана, из базы автора; большие статьи-исследования собираются из таких.
+   Отдельного типа записи нет — тот же kind: 'article', различает жанр (поле genre реестра). */
+const BRIEF_GENRE = 'Краткий ответ';
+const isBrief = e => kindOf(e) === 'article' && Array.isArray(e.genre) && e.genre.includes(BRIEF_GENRE);
+const articleWord = e => (isBrief(e) ? 'Краткий ответ' : 'Статья');
+function briefTag() {
+  const s = document.createElement('span');
+  s.className = 'brief-tag';
+  s.textContent = 'Краткий ответ';
+  s.title = 'Готовый ответ на один вопрос, с доводами; подробное исследование темы — в больших статьях';
+  return s;
+}
 function kindLabel(e) {
-  if (kindOf(e) === 'article') { const t = readTime(e); return 'Статья' + (t ? ' · ' + t : ''); }
+  if (kindOf(e) === 'article') { const t = readTime(e); return articleWord(e) + (t ? ' · ' + t : ''); }
   const n = e && e.counts && e.counts.chapters;
   return 'Книга' + (n ? ` · ${n} ${plural(n, 'глава', 'главы', 'глав')}` : '');
 }
@@ -5474,12 +5488,14 @@ const minutesOf = e => { const слов = e && e.counts && e.counts.words; retur
    «библиотека опустела». */
 let shelfStatus = 'all';   // all | none | reading | done
 let shelfLen = 'any';      // any | short | long — только у статей
+let shelfForm = 'any';     // any | brief | full — только у статей: краткие ответы или исследования
 const LEN_SHORT = 15, LEN_LONG = 30;   // минуты чтения
 let shelfChipsOf = null;   // вкладка, на которой выбраны чипы: на другой они не действуют
 const lenIs = (e, id) => { const мин = minutesOf(e); return мин != null && (id === 'short' ? мин <= LEN_SHORT : мин >= LEN_LONG); };
 const statusOk = e => shelfStatus === 'all' || readState(e) === shelfStatus;
 const lenOk = e => shelfLen === 'any' || lenIs(e, shelfLen);
-const entryMatchesChips = e => statusOk(e) && lenOk(e);
+const formOk = e => shelfForm === 'any' || (shelfForm === 'brief') === isBrief(e);
+const entryMatchesChips = e => statusOk(e) && lenOk(e) && formOk(e);
 function chipEl(имя, активен, нажали, n) {
   const b = document.createElement('button');
   b.type = 'button';
@@ -5531,7 +5547,7 @@ function continueRow(начатые, open) {
     const meta = document.createElement('span');
     meta.className = 'cont-meta';
     // книги и статьи здесь вперемешку — подпись типа говорит, что именно продолжаем
-    meta.textContent = (kindOf(e) === 'article' ? 'Статья' : 'Книга') + ' · ' + (l.page != null ? `стр. ${l.page}` : `${pct}%`);
+    meta.textContent = (kindOf(e) === 'article' ? articleWord(e) : 'Книга') + ' · ' + (l.page != null ? `стр. ${l.page}` : `${pct}%`);
     main.append(title, readBar(pct), meta);
     card.append(thumb, main);
     card.addEventListener('click', open(e));
@@ -5598,6 +5614,7 @@ function articleItem(e) {
 
   const meta = document.createElement('span');
   meta.className = 'art-meta';
+  if (isBrief(e)) meta.appendChild(briefTag());
   const path = bookCatPath(e);
   const биты = [seriesLabel(e), path.length ? path[path.length - 1] : '', readTime(e), entryDate(e)].filter(Boolean);
   if (биты.length) { const t = document.createElement('span'); t.textContent = биты.join(' · '); meta.appendChild(t); }
@@ -5666,7 +5683,7 @@ const SHELF_RESTORE_MAX = 600;   // больше разом не рисуем д
    settings в другом порядке или с пустой группой от снятого фильтра, иначе считался бы
    другим списком — и возврат из книги терял место. */
 const facetsCanon = () => { const f = settings.shelfFacets || {}; return FACETS.map(x => [x.key, f[x.key] || []]).filter(([, v]) => v.length); };
-const shelfSig = () => JSON.stringify([shelfKind(), settings.shelfCat, facetsCanon(), shelfQuery, shelfSort(), settings.shelfView, shelfStatus, shelfLen]);
+const shelfSig = () => JSON.stringify([shelfKind(), settings.shelfCat, facetsCanon(), shelfQuery, shelfSort(), settings.shelfView, shelfStatus, shelfLen, shelfForm]);
 function leaveShelf() {
   if (onShelf) shelfReturn = { y: window.scrollY, n: shelfDrawn, sig: shelfSig() };
   onShelf = false;
@@ -5759,8 +5776,8 @@ function renderBookList(shown, view, host, минимум = 0) {
    — раздел — по id узла taxonomy.json, а не по названию: названия правятся;
    — адрес меняем через replaceState: отбор — не переход, и «назад» с полки не должен
      ходить по каждому нажатому чипу. */
-const SHELF_READ = ['none', 'reading', 'done'], SHELF_LEN = ['short', 'long'];
-const shelfParams = () => ['tab', 'cat', 'q', 'read', 'len', ...FACETS.map(f => f.key)];
+const SHELF_READ = ['none', 'reading', 'done'], SHELF_LEN = ['short', 'long'], SHELF_FORM = ['brief', 'full'];
+const shelfParams = () => ['tab', 'cat', 'q', 'read', 'len', 'form', ...FACETS.map(f => f.key)];
 function catIdOf(path) {
   if (!path.length) return null;
   for (const n of taxNodes) {
@@ -5776,6 +5793,7 @@ function shelfUrl() {
   if (id) p.set('cat', id);
   if (shelfStatus !== 'all') p.set('read', shelfStatus);
   if (shelfLen !== 'any') p.set('len', shelfLen);
+  if (shelfForm !== 'any') p.set('form', shelfForm);
   for (const [key, vals] of facetsCanon()) for (const v of vals) p.append(key, v);
   if (shelfQuery) p.set('q', shelfQuery);
   // вкладку называем, когда она не «Книги» или когда в адресе уже есть отбор: ссылка
@@ -5804,6 +5822,7 @@ function applyShelfUrl(params, изИстории = false) {
   shelfStatus = SHELF_READ.includes(params.get('read')) ? params.get('read') : 'all';
   const вид = shelfKind();
   shelfLen = вид === 'article' && SHELF_LEN.includes(params.get('len')) ? params.get('len') : 'any';
+  shelfForm = вид === 'article' && SHELF_FORM.includes(params.get('form')) ? params.get('form') : 'any';
   shelfChipsOf = вид;   // чипы пришли из адреса для этой вкладки — renderLibrary их не сбросит
   saveSettings();
   return true;
@@ -5883,7 +5902,7 @@ function renderLibrary(opts = {}) {
   /* Чипы — про список одной вкладки. На другую попадают не только её кнопкой: подсказка
      «Во вкладке … — N», возврат из записи другого типа. Отбор, пришедший следом, показал бы
      там пустой список рядом с найденным. */
-  if (shelfChipsOf !== вид) { shelfStatus = 'all'; shelfLen = 'any'; shelfChipsOf = вид; }
+  if (shelfChipsOf !== вид) { shelfStatus = 'all'; shelfLen = 'any'; shelfForm = 'any'; shelfChipsOf = вид; }
   const типы = KINDS.filter(k => library.some(e => kindOf(e) === k.id));
   if (типы.length > 1) {
     const tabs = document.createElement('div');
@@ -6112,7 +6131,7 @@ function renderLibrary(opts = {}) {
       if (shown.length) body.appendChild(вТексте);
     }
     // «Начните отсюда» — только над полным списком: под отбором и поиском оно мешало бы
-    if (!shelfQuery && shelfStatus === 'all' && shelfLen === 'any' && !activeFilterCount()) {
+    if (!shelfQuery && shelfStatus === 'all' && shelfLen === 'any' && shelfForm === 'any' && !activeFilterCount()) {
       const закреп = underCat.filter(e => e.pinned)
         .sort((a, b) => (Number(a.pinned) || 0) - (Number(b.pinned) || 0));
       if (закреп.length) body.appendChild(pinnedBlock(закреп));
@@ -6145,10 +6164,17 @@ function renderLibrary(opts = {}) {
     const фокус = chipsRow.contains(document.activeElement) ? document.activeElement : null;
     chipsRow.innerHTML = '';
     const есть = [];
-    const поДлине = основа.filter(lenOk), поСостоянию = основа.filter(statusOk);
+    // у каждой группы свой счёт: по соседним группам, без своей
+    const поДлине = основа.filter(e => lenOk(e) && formOk(e));
+    const поСостоянию = основа.filter(e => statusOk(e) && formOk(e));
+    const поФорме = основа.filter(e => statusOk(e) && lenOk(e));
     for (const [id, имя] of [['none', 'Не читал'], ['reading', 'Читаю'], ['done', 'Прочитано']]) {
       const n = поДлине.filter(e => readState(e) === id).length;
       if ((n && n < поДлине.length) || shelfStatus === id) есть.push({ что: 'status', id, имя, n });
+    }
+    if (вид === 'article') for (const [id, имя] of [['brief', 'Краткие ответы'], ['full', 'Исследования']]) {
+      const n = поФорме.filter(e => (id === 'brief') === isBrief(e)).length;
+      if ((n && n < поФорме.length) || shelfForm === id) есть.push({ что: 'form', id, имя, n });
     }
     if (вид === 'article') for (const [id, имя] of [['short', 'Короткие'], ['long', 'Длинные']]) {
       const n = поСостоянию.filter(e => lenIs(e, id)).length;
@@ -6163,14 +6189,15 @@ function renderLibrary(opts = {}) {
       return;
     }
     chipsRow.appendChild(filt);
-    chipsRow.appendChild(chipEl('Все', shelfStatus === 'all' && shelfLen === 'any', () => {
-      shelfStatus = 'all'; shelfLen = 'any'; paint();
+    chipsRow.appendChild(chipEl('Все', shelfStatus === 'all' && shelfLen === 'any' && shelfForm === 'any', () => {
+      shelfStatus = 'all'; shelfLen = 'any'; shelfForm = 'any'; paint();
     }));
     for (const ч of есть) {
-      const активен = ч.что === 'status' ? shelfStatus === ч.id : shelfLen === ч.id;
+      const активен = ч.что === 'status' ? shelfStatus === ч.id : ч.что === 'form' ? shelfForm === ч.id : shelfLen === ч.id;
       chipsRow.appendChild(chipEl(ч.имя, активен, () => {
         // повторное нажатие снимает отбор — отдельной кнопки «сбросить» не нужно
         if (ч.что === 'status') shelfStatus = активен ? 'all' : ч.id;
+        else if (ч.что === 'form') shelfForm = активен ? 'any' : ч.id;
         else shelfLen = активен ? 'any' : ч.id;
         paint();
       }, ч.n));

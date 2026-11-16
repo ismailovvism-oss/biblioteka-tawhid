@@ -1987,6 +1987,17 @@ body:not([data-view="reading"]) #btn-comic { display: none; }
   line-height: 1.4;
 }
 .art-read { color: var(--accent); }
+/* «Краткий ответ» — контурная метка: отличает ответ на один вопрос от статьи-исследования */
+.brief-tag {
+  display: inline-block;
+  padding: 0.02em 0.5em;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  color: var(--accent);
+  font-size: 0.72rem;
+  line-height: 1.35;
+  white-space: nowrap;
+}
 .art-status { display: inline-flex; gap: 0.25rem; }
 .art-status .review-badge, .art-info .review-badge { position: static; box-shadow: none; }
 @media (min-width: 600px) {

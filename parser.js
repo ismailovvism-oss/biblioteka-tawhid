@@ -210,6 +210,19 @@ function renderSlides(title, body, base) {
     + (rest.length ? renderBlocks(rest, base).join('') : '');
 }
 
+/* Арабский абзац внутри русской главы (оригинал цитаты в «📖 Оригинал», 16.11.2026): глава
+   размечена слева направо, и знак в начале арабской строки — скобка аята ﴿, кавычка —
+   становился не на ту сторону. Справа налево — абзац, который начинается с арабской буквы и где
+   арабских букв больше, чем кириллицы и латиницы. Сноска «Ибн Касир, „Тафсир“…: <длинный
+   арабский>» начинается по-русски и остаётся слева направо. */
+function paraOpen(run) {
+  const t = run.join(' ');
+  const первая = t.match(/[A-Za-z\u0400-\u04FF\u0600-\u06FF]/);
+  if (!первая || !/[\u0600-\u06FF]/.test(первая[0])) return '<p>';
+  const ар = (t.match(/[\u0600-\u06FF]/g) || []).length;
+  const прочие = (t.match(/[A-Za-z\u0400-\u04FF]/g) || []).length;
+  return ар > прочие ? '<p dir="rtl">' : '<p>';
+}
 function renderBlocks(lines, base) {
   base = base || '';
   const isQuote = l => /^>\s?/.test(l);
@@ -296,7 +309,7 @@ function renderBlocks(lines, base) {
     while (i < lines.length && !isQuote(lines[i]) && !isUl(lines[i]) && !isOl(lines[i])
            && !isFence(lines[i]) && !isTableStart(i)
            && !(IMG_RE.test(lines[i]) && safeImgSrc(lines[i].match(IMG_RE)[2]))) { run.push(lines[i]); i++; }
-    out.push('<p>' + inlineMd(run.join('\n')) + '</p>');
+    out.push(paraOpen(run) + inlineMd(run.join('\n')) + '</p>');
   }
   return out;
 }
