@@ -19,6 +19,9 @@
  *       (без сносок) на языке чтения: русский, если он есть, иначе последний язык книги;
  *   "description" — только у статей ("kind": "article"): копия аннотации из book.json.
  *       Источник истины — манифест; здесь копия, её нельзя править руками.
+ *   "razbor": { "frames": N, "words": N } — только если у записи есть «Ясный разбор»
+ *       (book.json → "razbor", SPEC 3.4h): лента ставит значок, шапка статьи — «· N мин».
+ *       Нет разбора — поля нет.
  *
  * Запускать после добавления записи и после правки текста или аннотации. Забыли —
  * tools/doctor.js скажет, что сведения устарели.
@@ -32,6 +35,7 @@
 const fs = require('fs');
 const path = require('path');
 const Contract = require('../contract.js');
+const { razborFile, razborCounts } = require('../parser.js');
 
 const КОРЕНЬ = path.join(__dirname, '..');
 const РЕЕСТР = path.join(КОРЕНЬ, 'books', 'index.json');
@@ -66,7 +70,18 @@ function сведения(запись, корень = КОРЕНЬ) {
 
 const одинаковы = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
-module.exports = { посчитать, сведения, одинаковы };
+/** «Ясный разбор» записи: { frames, words }; undefined — разбора нет; null — судить не о чем. */
+function сведенияРазбора(запись, корень = КОРЕНЬ) {
+  if (!запись || !запись.base || /^https?:\/\//.test(запись.base)) return null;
+  const папка = path.join(корень, запись.base);
+  let манифест;
+  try { манифест = JSON.parse(fs.readFileSync(path.join(папка, 'book.json'), 'utf8')); } catch { return null; }
+  const файл = razborFile(манифест, Contract.readingLang(манифест));
+  if (!файл) return undefined;
+  try { return razborCounts(JSON.parse(fs.readFileSync(path.join(папка, файл), 'utf8'))); } catch { return null; }
+}
+
+module.exports = { посчитать, сведения, сведенияРазбора, одинаковы };
 
 if (require.main === module) {
   const текст = fs.readFileSync(РЕЕСТР, 'utf8');
@@ -80,10 +95,14 @@ if (require.main === module) {
     let тронуто = false;
     if (!одинаковы(з.counts, с.counts)) { з.counts = с.counts; тронуто = true; }
     if (с.description !== undefined && !одинаковы(з.description, с.description)) { з.description = с.description; тронуто = true; }
+    const р = сведенияРазбора(з);
+    if (р === undefined && з.razbor !== undefined) { delete з.razbor; тронуто = true; }
+    if (р && !одинаковы(з.razbor, р)) { з.razbor = р; тронуто = true; }
     if (тронуто) изменено++;
     const мин = Contract.readMinutes(с.counts.words);
     console.log(`  · ${з.id}: глав ${с.counts.chapters}, слов ${с.counts.words}` +
-      (з.kind === 'article' ? `, читать ~${мин} мин` : '') + (тронуто ? '  ← обновлено' : ''));
+      (з.kind === 'article' ? `, читать ~${мин} мин` : '') +
+      (з.razbor ? `, разбор: кадров ${з.razbor.frames}, ~${Contract.readMinutes(з.razbor.words)} мин` : '') + (тронуто ? '  ← обновлено' : ''));
   }
 
   if (изменено) {

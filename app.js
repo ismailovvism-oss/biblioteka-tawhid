@@ -495,6 +495,9 @@ function articleHead() {
     setTextSlw(p, аннотация);
     head.appendChild(p);
   }
+  // «Кратко / Ясный разбор / Полностью» — под аннотацией, до «Содержания» (SPEC 3.4h)
+  const способы = articleModes();
+  if (способы) head.appendChild(способы);
   // разделы статьи — сразу под аннотацией: видно, из чего она состоит, и к нужному один шаг
   const разделы = inStream().filter(k => chHasFile(book.chapters[k]));
   if (разделы.length >= 3) head.appendChild(articleToc(разделы));
@@ -1335,6 +1338,343 @@ document.addEventListener('keydown', e => {
   if (k === 'ArrowRight' || k === 'PageDown' || (k === ' ' && !e.target.closest?.('select'))) { e.preventDefault(); e.stopPropagation(); comicStep(1); }
   else if (k === 'ArrowLeft' || k === 'PageUp') { e.preventDefault(); e.stopPropagation(); comicStep(-1); }
 }, true);
+
+/* ===== ЯСНЫЙ РАЗБОР: статья по шагам во весь экран (SPEC 3.4h) =====
+ * Третий способ прочитать статью — между «Кратко» (министатья) и «Полностью» (сама статья).
+ * Кадры — не из отрисованной главы, как у комикса, а из отдельного файла при статье
+ * (`book.json` → "razbor"): это выжимка автора, а не другой показ того же текста.
+ * Листается как комикс (свайп, тап по третям, ←/→, пробел; Esc и «назад» — к статье),
+ * но кадр — вёрстка в теме читалки, а не картинка на тёмном фоне.
+ * ⚠ Пройденный разбор статью «прочитанной» не делает: место в разборе помним отдельно
+ * (`settings.razborAt`), а `settings.last` — про текст статьи. */
+const rz = { data: null, i: 0, answers: new Map() };
+let rzCache = null;                                   // { id, file, data } — разбор открытой записи
+const RZ_CAVEAT = { ijtihad: 'Иджтихад автора', khilaf: 'Разногласие', limits: 'Границы вывода' };
+function rzLang() { return book.languages.includes('ru') ? 'ru' : book.languages[book.languages.length - 1]; }
+// разбор — у статьи: у книги и комикса кнопки нет, и ссылка ?razbor= на них не открывает его
+function hasRazbor() { return Boolean(book && singlePage && razborFile(book, rzLang())); }
+function razborOpen() { return !$('#razbor').hidden; }
+// «Ясный разбор · 3 мин»: минуты — из реестра (gen-meta.js), чтобы не ждать файл ради подписи
+function razborLabel(e) {
+  const w = e && e.razbor && e.razbor.words;
+  return w ? `Ясный разбор · ${Math.max(1, Math.round(w / READ_WPM))} мин` : 'Ясный разбор';
+}
+async function loadRazbor() {
+  const file = razborFile(book, rzLang());
+  if (!file) return null;
+  if (rzCache && rzCache.id === bookId && rzCache.file === file) return rzCache.data;
+  const моя = bookId;
+  const data = JSON.parse(await fetchBookText(base + file));
+  if (моя !== bookId) return null;                    // пока грузилось, ушли в другую запись
+  if (!data || !Array.isArray(data.frames) || !data.frames.length) throw new Error('в разборе нет кадров');
+  rzCache = { id: bookId, file, data };
+  return data;
+}
+const rzUrl = i => location.pathname + '?book=' + encodeURIComponent(bookId) + '&razbor=' + (i + 1);
+
+/* at — номер кадра с нуля; null — где остановились (пройденный до конца — сначала).
+   fromHistory — адрес уже стоит на маркере панели (шаг «вперёд» по истории): нового
+   шага не кладём, иначе в истории стало бы два разбора подряд. */
+async function openRazbor(at = null, opts = {}) {
+  if (!hasRazbor()) return;
+  let data;
+  try { data = await loadRazbor(); } catch (err) { console.warn('разбор:', err); toast('Разбор не загрузился'); return; }
+  if (!data) return;
+  rz.data = data;
+  rz.answers = new Map();
+  const n = data.frames.length;
+  const место = (settings.razborAt || {})[bookId];
+  // номер мимо разбора (кадры убавились, опечатка в ссылке) — с начала
+  let i = at != null ? (at < n ? at : 0) : (Number.isInteger(место) && место < n - 1 ? место : 0);
+  rz.i = Math.max(0, Math.min(i | 0, n - 1));
+  const el = $('#razbor');
+  $('#rz-name').textContent = data.title || pickTitle(book.title);
+  rz.back = document.activeElement;                  // куда вернуть фокус после закрытия
+  if (opts.fromHistory) { el.hidden = false; overlayMark = true; } else openOverlay(el);
+  document.body.classList.add('razbor-open');
+  /* Фокус — в разбор: иначе он остаётся на кнопке «Ясный разбор» под панелью, и пробел
+     нажимал её снова вместо «дальше», а Tab уходил в статью за панелью. */
+  $('#rz-stage').focus({ preventScroll: true });
+  $('#rz-bar').innerHTML = '';
+  for (let k = 0; k < n; k++) $('#rz-bar').appendChild(document.createElement('i'));
+  rzRender();
+}
+function closeRazbor(fromUi) {
+  $('#razbor').hidden = true;
+  document.body.classList.remove('razbor-open');
+  if (rz.back && rz.back.isConnected) rz.back.focus({ preventScroll: true });
+  rz.back = null;
+  if (fromUi) consumeOverlayMark();
+}
+function rzStep(d) {
+  const j = rz.i + d;
+  if (!rz.data || j < 0 || j >= rz.data.frames.length) return;
+  rz.i = j; rzRender();
+}
+
+// маленькие строители кадра: текст — через inlineMd (он же экранирует), арабский — как есть
+function rzEl(tag, cls, md) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (md != null) {
+    e.innerHTML = inlineMd(String(md));
+    // сносок и глоссария в кадре нет (адрес — в "ref"): кнопки без обработчика не оставляем
+    e.querySelectorAll('.fnref').forEach(b => b.remove());
+    e.querySelectorAll('.gterm').forEach(b => b.replaceWith(b.textContent));
+  }
+  return e;
+}
+function rzArabic(text, quran) {
+  const p = document.createElement('p');
+  p.className = 'rz-ar' + (quran ? ' rz-quran' : '');
+  p.lang = 'ar'; p.dir = 'rtl';
+  p.textContent = quran ? '﴿' + text + '﴾' : text;
+  return p;
+}
+// текст довода: арабский, перевод, адрес — у довода, у возражения и у ответа на него
+function rzText(box, part, quran) {
+  if (part.ar) box.appendChild(rzArabic(part.ar, quran));
+  if (part.tr) box.appendChild(rzEl('p', 'rz-tr', part.tr));
+  if (part.ref) box.appendChild(rzEl('p', 'rz-ref', part.ref));
+}
+function rzGoArticle(c, s) {
+  closeRazbor(true);
+  const ci = Number.isInteger(c) ? c - 1 : 0;
+  loadChapter(Math.max(0, Math.min(ci, book.chapters.length - 1)), s || undefined);
+}
+function rzButton(cls, text, on) {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = cls;
+  setTextSlw(b, text);
+  b.addEventListener('click', on);
+  return b;
+}
+
+function rzFrame(f, i) {
+  const fr = document.createElement('article');
+  fr.className = 'rz-frame rz-' + f.type;
+  const kicker = t => fr.appendChild(rzEl('div', 'rz-kicker', t));
+  const title = () => { if (f.title) fr.appendChild(rzEl('h2', 'rz-title', f.title)); };
+  switch (f.type) {
+    case 'question':
+      kicker('Ясный разбор');
+      title();
+      if (f.text) fr.appendChild(rzEl('p', 'rz-sub', f.text));
+      break;
+    case 'position':
+      kicker(f.title || 'Ответ');
+      fr.appendChild(rzEl('p', 'rz-lead', f.text));
+      break;
+    case 'proof': {
+      if (f.n) { const n = rzEl('div', 'rz-num'); n.textContent = f.n; fr.appendChild(n); }
+      title();
+      const sheet = rzEl('div', 'rz-sheet');
+      if (f.text) sheet.appendChild(rzEl('p', 'rz-tr', f.text));
+      rzText(sheet, f, f.quran);
+      fr.appendChild(sheet);
+      if (f.note) fr.appendChild(rzEl('p', 'rz-note', f.note));
+      break;
+    }
+    case 'objection': {
+      kicker('Возражение');
+      title();
+      for (const [k, подпись] of [['claim', 'Скажут'], ['answer', 'Ответим']]) {
+        const part = f[k] || {};
+        const box = rzEl('div', 'rz-part rz-' + k);
+        box.appendChild(rzEl('div', 'rz-part-h', подпись));
+        if (part.text) box.appendChild(rzEl('p', 'rz-ptext', part.text));
+        rzText(box, part, part.quran);
+        fr.appendChild(box);
+      }
+      break;
+    }
+    case 'scheme':
+      title();
+      if (Array.isArray(f.rows) && f.rows.length) {
+        const rows = rzEl('div', 'rz-rows');
+        f.rows.forEach(r => {
+          const row = rzEl('div', 'rz-row');
+          if (r.label) row.appendChild(rzEl('b', null, r.label));
+          row.appendChild(rzEl('span', null, r.text));
+          rows.appendChild(row);
+        });
+        fr.appendChild(rows);
+      } else if (f.img) {
+        const img = document.createElement('img');
+        img.src = base + f.img; img.alt = f.title || ''; img.className = 'rz-img';
+        fr.appendChild(img);
+      }
+      if (f.text) fr.appendChild(rzEl('p', 'rz-note', f.text));
+      break;
+    case 'summary':
+      title();
+      if (Array.isArray(f.fork)) {
+        const fork = rzEl('div', 'rz-fork');
+        f.fork.forEach(r => {
+          const row = rzEl('div', 'rz-branch');
+          row.append(rzEl('span', 'rz-if', r.if), rzEl('span', 'rz-then', r.then));
+          fork.appendChild(row);
+        });
+        fr.appendChild(fork);
+      }
+      if (f.text) fr.appendChild(rzEl('p', 'rz-sub', f.text));
+      if (f.quote) fr.appendChild(rzEl('blockquote', 'rz-quote', f.quote));
+      break;
+    case 'caveat':
+      kicker(RZ_CAVEAT[f.kind] || 'Оговорка');
+      title();
+      fr.appendChild(rzEl('p', 'rz-lead', f.text));
+      break;
+    case 'check': {
+      kicker('Проверь себя');
+      if (f.title && f.title !== 'Проверь себя') title();
+      fr.appendChild(rzEl('p', 'rz-q', f.q));
+      const opts = rzEl('div', 'rz-options');
+      const why = rzEl('p', 'rz-why');
+      why.setAttribute('aria-live', 'polite');
+      const показать = k => {
+        rz.answers.set(i, k);
+        [...opts.children].forEach((b, j) => {
+          b.classList.toggle('chosen', j === k);
+          b.classList.toggle('ok', j === k ? f.options[j].ok === true : false);
+          b.classList.toggle('wrong', j === k && f.options[j].ok !== true);
+          b.setAttribute('aria-pressed', String(j === k));
+        });
+        const o = f.options[k];
+        why.innerHTML = '';
+        why.appendChild(rzEl('b', null, o.ok ? 'Верно.' : 'Неверно.'));
+        if (o.why) why.append(' ', rzEl('span', null, o.why.replace(/^(Верно|Неверно)\.\s*/, '')));
+        why.className = 'rz-why ' + (o.ok ? 'ok' : 'wrong');
+      };
+      (f.options || []).forEach((o, k) => opts.appendChild(rzButton('rz-option', o.text, () => показать(k))));
+      fr.append(opts, why);
+      if (rz.answers.has(i)) показать(rz.answers.get(i));
+      break;
+    }
+    case 'next': {
+      title();
+      if (f.text) fr.appendChild(rzEl('p', 'rz-sub', f.text));
+      const list = rzEl('div', 'rz-links');
+      for (const l of f.links || []) {
+        const ch = book.chapters[(l.c | 0) - 1];
+        const подпись = l.label || (ch ? pickTitle(ch.title || {}) : 'Раздел ' + l.c);
+        list.appendChild(rzButton('rz-link', подпись + ' →', () => rzGoArticle(l.c, l.s)));
+      }
+      fr.appendChild(list);
+      break;
+    }
+    default:
+      if (f.title) title();
+      if (f.text) fr.appendChild(rzEl('p', 'rz-sub', f.text));
+  }
+  // откуда кадр взят — одно касание до этого места полной статьи
+  if (f.src && f.type !== 'next') {
+    fr.appendChild(rzButton('rz-more', 'Подробнее в статье →', () => rzGoArticle(f.src.c, f.src.s)));
+  }
+  return fr;
+}
+
+function rzRender() {
+  const frames = rz.data.frames, n = frames.length;
+  const st = $('#rz-stage');
+  st.innerHTML = '';
+  const fr = rzFrame(frames[rz.i], rz.i);
+  if (rz.i === n - 1) {                                 // последний кадр: куда дальше
+    const end = rzEl('div', 'rz-end');
+    end.append(
+      rzButton('rz-end-main', 'Читать полностью', async () => { closeRazbor(true); await settleBack(); window.scrollTo({ top: 0 }); }),
+      rzButton('rz-end-again', 'Ещё раз', () => { rz.i = 0; rz.answers.clear(); rzRender(); }));
+    fr.appendChild(end);
+  }
+  st.appendChild(fr);
+  st.scrollTop = 0;
+  [...$('#rz-bar').children].forEach((b, k) => { b.className = k < rz.i ? 'done' : k === rz.i ? 'now' : ''; });
+  $('#rz-count').textContent = `${rz.i + 1} / ${n}`;
+  $('#rz-prev').disabled = rz.i === 0;
+  $('#rz-next').disabled = rz.i === n - 1;
+  settings.razborAt = settings.razborAt || {};
+  settings.razborAt[bookId] = rz.i;
+  saveSettings();
+  // адрес кадра — на месте, без новых шагов истории (SPEC 5.9)
+  try { history.replaceState(history.state, '', rzUrl(rz.i)); } catch { /* Safari: лимит замен адреса — не беда */ }
+}
+$('#rz-close').addEventListener('click', () => closeRazbor(true));
+$('#rz-prev').addEventListener('click', () => rzStep(-1));
+$('#rz-next').addEventListener('click', () => rzStep(1));
+// тап: левая треть — назад, остальное — вперёд; кнопки и выделение текста не листают
+$('#rz-stage').addEventListener('click', e => {
+  if (e.target.closest('button, a, input, select') || !window.getSelection().isCollapsed) return;
+  const r = $('#rz-stage').getBoundingClientRect();
+  rzStep(e.clientX - r.left < r.width / 3 ? -1 : 1);
+});
+{
+  let x0 = null, y0 = 0;
+  $('#razbor').addEventListener('touchstart', e => {
+    if (e.touches.length !== 1) { x0 = null; return; }
+    x0 = e.touches[0].clientX; y0 = e.touches[0].clientY;
+  }, { passive: true });
+  $('#razbor').addEventListener('touchend', e => {
+    if (x0 == null) return;
+    const t = e.changedTouches[0], dx = t.clientX - x0, dy = t.clientY - y0; x0 = null;
+    if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.4) rzStep(dx < 0 ? 1 : -1);
+  }, { passive: true });
+}
+// клавиши — на погружении, раньше обработчика глав; пробел на кнопке нажимает кнопку
+document.addEventListener('keydown', e => {
+  if (!razborOpen()) return;
+  const k = e.key;
+  if (k === 'Escape') { e.preventDefault(); e.stopPropagation(); closeRazbor(true); return; }
+  if ((k === ' ' || k === 'Enter') && e.target.closest?.('button')) return;
+  // длинный кадр (телефон боком): пробел и PageDown сперва докручивают его, потом листают
+  const st = $('#rz-stage');
+  const ниже = st.scrollTop + st.clientHeight < st.scrollHeight - 4, выше = st.scrollTop > 4;
+  if ((k === ' ' || k === 'PageDown') && ниже) { e.stopPropagation(); if (e.target !== st) { e.preventDefault(); st.scrollBy({ top: st.clientHeight * 0.85 }); } return; }
+  if (k === 'PageUp' && выше) { e.stopPropagation(); if (e.target !== st) { e.preventDefault(); st.scrollBy({ top: -st.clientHeight * 0.85 }); } return; }
+  if (k === 'ArrowRight' || k === 'PageDown' || k === ' ') { e.preventDefault(); e.stopPropagation(); rzStep(1); }
+  else if (k === 'ArrowLeft' || k === 'PageUp') { e.preventDefault(); e.stopPropagation(); rzStep(-1); }
+}, true);
+
+/* Шапка статьи: «Кратко / Ясный разбор / Полностью» (SPEC 3.4h, 3.6). «Кратко» — министатья,
+   которую статья называет в поле `brief`; у самой министатьи «Полностью» ведёт в статью,
+   которая её так называет. Нет ни краткого ответа, ни разбора — ряда нет.
+   Разбор — один на тему: есть полная статья — он у неё, и из министатьи «Ясный разбор»
+   ведёт в разбор полной; министатья без полной держит свой. */
+function articleModes() {
+  const e = bookEntry || {};
+  const полная = isBrief(e) ? library.find(x => x.brief === e.id && !x.draft) : e;
+  const краткая = isBrief(e) ? e : (e.brief ? library.find(x => x.id === e.brief && !x.draft) : null);
+  const пара = Boolean(краткая && полная && краткая !== полная);
+  const свой = hasRazbor();
+  const уПолной = !свой && пара && e === краткая && полная.razbor ? полная : null;
+  if (!свой && !уПолной && !пара) return null;
+  const чей = свой ? e : уПолной;
+  const открыть = () => {
+    if (свой) { openRazbor(); return; }
+    // разбор полной статьи: в адресе — она с кадром, а route ставит её под разбор (см. route)
+    navPush('?book=' + encodeURIComponent(уПолной.id) + '&razbor');
+    route();
+  };
+  const row = document.createElement('div');
+  row.className = 'art-modes';
+  if (!пара) {                                         // только разбор — одна кнопка
+    const b = rzButton('art-razbor', razborLabel(чей), открыть);
+    b.prepend(svgIco('steps'), ' ');
+    row.appendChild(b);
+    return row;
+  }
+  row.setAttribute('role', 'group');
+  row.setAttribute('aria-label', 'Как читать');
+  row.classList.add('seg');
+  const пункт = (текст, тут, on) => {
+    const b = rzButton('art-mode' + (тут ? ' here' : ''), текст, on);
+    if (тут) b.setAttribute('aria-current', 'true');
+    row.appendChild(b);
+  };
+  пункт('Кратко', e === краткая, () => { if (e !== краткая) openEntry(краткая); });
+  if (свой || уПолной) пункт(razborLabel(чей), false, открыть);
+  пункт('Полностью', e === полная, () => { if (e !== полная) openEntry(полная); });
+  return row;
+}
 
 /* ===== сноски: две механики над одним источником ===== */
 function findPairElBack(el) {
@@ -4170,11 +4510,12 @@ $('#page-form').addEventListener('submit', e => {
 
 /* ===== клавиатура: стрелки — главы, Esc — закрыть ===== */
 function anyPopupOpen() {
-  return [...document.querySelectorAll('.overlay')].some(o => !o.hidden) || !$('#comic').hidden || !$('#term-pop').hidden ||
+  return [...document.querySelectorAll('.overlay')].some(o => !o.hidden) || !$('#comic').hidden || !$('#razbor').hidden || !$('#term-pop').hidden ||
     !$('#img-overlay').hidden || !$('#page-popover').hidden;
 }
 function closeTopPopup() {
   if (!$('#term-pop').hidden) { closeTermPop(); return true; }
+  if (!$('#razbor').hidden) { closeRazbor(false); return true; }
   if (!$('#comic').hidden) { closeComic(false); return true; }
   if (!$('#img-overlay').hidden) { $('#img-overlay').hidden = true; return true; }
   if (!$('#page-popover').hidden) { $('#page-popover').hidden = true; return true; }
@@ -5615,6 +5956,13 @@ function articleItem(e) {
   const meta = document.createElement('span');
   meta.className = 'art-meta';
   if (isBrief(e)) meta.appendChild(briefTag());
+  if (e.razbor) {                     // есть «Ясный разбор» (SPEC 3.4h): сведения кладёт gen-meta.js
+    const t = document.createElement('span');
+    t.className = 'rz-tag';
+    t.title = 'Есть «Ясный разбор» — статья по шагам';
+    icoLabel(t, 'steps', 'разбор');
+    meta.appendChild(t);
+  }
   const path = bookCatPath(e);
   const биты = [seriesLabel(e), path.length ? path[path.length - 1] : '', readTime(e), entryDate(e)].filter(Boolean);
   if (биты.length) { const t = document.createElement('span'); t.textContent = биты.join(' · '); meta.appendChild(t); }
@@ -5873,6 +6221,7 @@ function renderLibrary(opts = {}) {
   // столько записей разом не рисуем, а без них прокрутке некуда встать — честнее начать сверху
   if (вернуть && вернуть.n > SHELF_RESTORE_MAX) вернуть = null;
   if (!$('#comic').hidden) { $('#comic').hidden = true; document.body.classList.remove('comic-open'); }
+  if (!$('#razbor').hidden) { $('#razbor').hidden = true; document.body.classList.remove('razbor-open'); }
   document.body.dataset.view = 'library';
   syncTopbar();
   if (mtModeOn()) setMtMode(false);   // режим перевода живёт только внутри книги
@@ -6416,6 +6765,7 @@ async function renderBookInfo(entry) {
    отрисован, и её режим «одной страницей» не должен достаться следующей книге. */
 function leaveReading() {
   singlePage = false;
+  rzCache = null;     // разбор перечитаем при следующем открытии: его могли поправить
   articleShown = null;
   streamChapters = [];
   fnShown = null;
@@ -6524,9 +6874,20 @@ function route(изИстории = false) {
   const safeSector = sector && /^[\w-]+$/.test(sector) ? sector : null;
   const c = params.get('c');
   const chapter = c && /^\d+$/.test(c) ? Number(c) - 1 : null;   // в ссылке главы считаются с единицы
+  // ?razbor=<кадр> — «Ясный разбор» статьи (SPEC 3.4h, 5.9): кадр с единицы, без номера — с начала
+  const rzRaw = params.get('razbor');
+  const rzAt = rzRaw == null ? null : (/^\d+$/.test(rzRaw) && Number(rzRaw) > 0 ? Number(rzRaw) - 1 : 0);
   if (entry && entry.draft) { renderBookInfo(entry); return; }   // текста ещё нет
   if (entry) {
-    openBook(entry, safeSector ? { sector: safeSector, chapter } : (chapter != null ? { chapter } : {}));
+    const открыто = openBook(entry, safeSector ? { sector: safeSector, chapter } : (chapter != null ? { chapter } : {}));
+    if (rzAt != null) {
+      /* Под разбором должна лежать сама статья: «назад» из разбора ведёт в неё, а не прочь из
+         читалки. Поэтому адрес этой записи истории — статья, а разбор кладёт свой шаг сверху.
+         На маркере разбора (шаг «вперёд») запись уже его — второго шага не кладём. */
+      const сМаркера = Boolean(history.state && history.state.overlay);
+      if (!сМаркера) try { history.replaceState(history.state, '', location.pathname + '?book=' + encodeURIComponent(entry.id)); } catch { /* не беда */ }
+      открыто.then(() => { if (bookId === entry.id && !razborOpen()) openRazbor(rzAt, { fromHistory: сМаркера }); });
+    }
     return;
   }
   const info = params.get('info');

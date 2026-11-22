@@ -925,8 +925,146 @@ function searchIndex(manifest, texts) {
   return { v: 1, langs, rtl: Array.isArray(manifest.rtl) ? manifest.rtl : [], ch };
 }
 
+/*
+ * «Ясный разбор» (SPEC 3.4h) — статья по шагам: отдельный файл кадров при статье
+ * (`book.json` → "razbor"). Здесь — общее для читалки и инструментов: какой файл, какие
+ * виды кадров, что в кадре показывается (для счёта слов) и проверка файла. Вёрстка
+ * кадров — в app.js; проверка файловой системы (картинки, тексты статьи) — у вызывающего.
+ */
+const RAZBOR_TYPES = ['question', 'position', 'proof', 'objection', 'scheme', 'summary', 'caveat', 'check', 'next'];
+const RAZBOR_CAVEATS = ['ijtihad', 'khilaf', 'limits'];
+
+/** Файл разбора для языка чтения: строка — один на все языки; объект — по языкам. */
+function razborFile(manifest, lang) {
+  const r = manifest && manifest.razbor;
+  if (!r) return null;
+  if (typeof r === 'string') return r;
+  if (typeof r !== 'object') return null;
+  return r[lang] || r.ru || Object.values(r).find(v => typeof v === 'string') || null;
+}
+
+/** Все файлы разбора, объявленные в манифесте (для проверки). */
+function razborFiles(manifest) {
+  const r = manifest && manifest.razbor;
+  if (!r) return [];
+  if (typeof r === 'string') return [r];
+  return typeof r === 'object' ? [...new Set(Object.values(r).filter(v => typeof v === 'string'))] : [];
+}
+
+const isObj = x => x && typeof x === 'object' && !Array.isArray(x);
+
+/** Что кадр показывает читателю: строки для счёта слов. `say` (текст для голоса) не в счёт. */
+function razborShown(f) {
+  const out = [];
+  const add = v => { if (typeof v === 'string' && v.trim()) out.push(v); };
+  if (!isObj(f)) return out;
+  ['title', 'text', 'tr', 'ref', 'note', 'quote', 'q'].forEach(k => add(f[k]));
+  for (const k of ['claim', 'answer']) if (isObj(f[k])) ['text', 'tr', 'ref'].forEach(x => add(f[k][x]));
+  for (const r of Array.isArray(f.rows) ? f.rows : []) if (isObj(r)) { add(r.label); add(r.text); }
+  for (const r of Array.isArray(f.fork) ? f.fork : []) if (isObj(r)) { add(r.if); add(r.then); }
+  for (const o of Array.isArray(f.options) ? f.options : []) if (isObj(o)) { add(o.text); add(o.why); }
+  for (const l of Array.isArray(f.links) ? f.links : []) if (isObj(l)) add(l.label);
+  return out;
+}
+
+/** Арабские тексты кадра: поле `ar` и `ar` у довода другой стороны и ответа. */
+function razborArabic(f) {
+  const out = [];
+  if (!isObj(f)) return out;
+  if (typeof f.ar === 'string' && f.ar.trim()) out.push(f.ar);
+  for (const k of ['claim', 'answer']) if (isObj(f[k]) && typeof f[k].ar === 'string' && f[k].ar.trim()) out.push(f[k].ar);
+  return out;
+}
+
+/** Число кадров и слов разбора — для подписи «Ясный разбор · N мин» в реестре. */
+function razborCounts(data) {
+  const frames = isObj(data) && Array.isArray(data.frames) ? data.frames : [];
+  let words = 0;
+  for (const f of frames) for (const s of razborShown(f)) words += (s.match(/[\p{L}\p{N}]+/gu) || []).length;
+  return { frames: frames.length, words };
+}
+
+/**
+ * Проверка файла разбора. ctx:
+ *   chapters — book.json.chapters;
+ *   sectors(c) — Set id секторов главы c (с единицы) или null, если главы нет;
+ *   source — текст статьи (все файлы глав подряд) для сверки арабского;
+ *   media(path) — есть ли файл картинки.
+ * Возвращает список ошибок (строки).
+ */
+function razborCheck(data, ctx) {
+  const errs = [];
+  if (!isObj(data) || !Array.isArray(data.frames)) return ['нет массива "frames"'];
+  if (!data.frames.length) errs.push('кадров нет');
+  const nfc = s => String(s).normalize('NFC');
+  const source = ctx && ctx.source != null ? nfc(ctx.source) : null;
+  const chapters = (ctx && ctx.chapters) || [];
+  const where = (c, s, tag) => {
+    if (!Number.isInteger(c) || c < 1 || c > chapters.length || !chapters[c - 1] || !chapters[c - 1].file) {
+      errs.push(`${tag}: главы ${c} нет (главы считаются с единицы, у записи-группы текста нет)`);
+      return;
+    }
+    if (s == null) return;
+    const ids = ctx.sectors ? ctx.sectors(c) : null;
+    if (typeof s !== 'string' || (ids && !ids.has(s))) errs.push(`${tag}: в главе ${c} нет сектора «${s}»`);
+  };
+  const str = v => typeof v === 'string' && v.trim() !== '';
+  data.frames.forEach((f, i) => {
+    const tag = `кадр ${i + 1}`;
+    if (!isObj(f)) { errs.push(`${tag}: не объект`); return; }
+    if (!RAZBOR_TYPES.includes(f.type)) { errs.push(`${tag}: неизвестный вид «${f.type}» (бывает: ${RAZBOR_TYPES.join(', ')})`); return; }
+    const t = `${tag} (${f.type})`;
+    const need = (k, ok = str(f[k])) => { if (!ok) errs.push(`${t}: нет поля "${k}"`); };
+    switch (f.type) {
+      case 'question': need('title'); break;
+      case 'position': need('text'); break;
+      case 'proof': need('tr'); if (!str(f.ar) && !str(f.text)) errs.push(`${t}: нужен "ar" (текст довода) или "text"`); need('ref'); break;
+      case 'objection':
+        need('claim', isObj(f.claim) && str(f.claim.text));
+        need('answer', isObj(f.answer) && str(f.answer.text));
+        break;
+      case 'scheme':
+        if (!(Array.isArray(f.rows) && f.rows.length) && !str(f.img)) errs.push(`${t}: нужен "rows" или "img"`);
+        for (const r of Array.isArray(f.rows) ? f.rows : []) if (!isObj(r) || !str(r.text)) errs.push(`${t}: у плашки нет "text"`);
+        break;
+      case 'summary':
+        if (!(Array.isArray(f.fork) && f.fork.length) && !str(f.quote) && !str(f.text)) errs.push(`${t}: нужен "fork", "quote" или "text"`);
+        for (const r of Array.isArray(f.fork) ? f.fork : []) if (!isObj(r) || !str(r.if) || !str(r.then)) errs.push(`${t}: у развилки нужны "if" и "then"`);
+        break;
+      case 'caveat':
+        need('text');
+        if (!RAZBOR_CAVEATS.includes(f.kind)) errs.push(`${t}: "kind" — ${RAZBOR_CAVEATS.join(', ')}`);
+        break;
+      case 'check': {
+        need('q');
+        const o = Array.isArray(f.options) ? f.options : [];
+        if (o.length < 2 || o.length > 4) errs.push(`${t}: вариантов нужно 2–4`);
+        if (!o.some(x => isObj(x) && x.ok === true)) errs.push(`${t}: ни один вариант не отмечен "ok": true`);
+        for (const x of o) if (!isObj(x) || !str(x.text)) errs.push(`${t}: у варианта нет "text"`);
+        break;
+      }
+      case 'next': {
+        const l = Array.isArray(f.links) ? f.links : [];
+        if (!l.length) errs.push(`${t}: нет ссылок "links"`);
+        l.forEach((x, k) => isObj(x) ? where(x.c, x.s, `${t}, ссылка ${k + 1}`) : errs.push(`${t}: ссылка ${k + 1} не объект`));
+        break;
+      }
+    }
+    if (f.src != null) { if (isObj(f.src)) where(f.src.c, f.src.s, `${t}, src`); else errs.push(`${t}: "src" — { "c": глава, "s": "сектор" }`); }
+    else if (['position', 'proof', 'objection', 'caveat'].includes(f.type)) errs.push(`${t}: нет "src" — откуда кадр взят в статье`);
+    if (f.img != null && !(str(f.img) && /^media\/[^?#]+$/.test(f.img) && !f.img.includes('..'))) errs.push(`${t}: картинка — только "media/…"`);
+    else if (str(f.img) && ctx && ctx.media && !ctx.media(f.img)) errs.push(`${t}: картинка не найдена: ${f.img}`);
+    // ⚠ арабский — только дословно из статьи: огласовки и порядок знаков ломаются незаметно
+    if (source != null) for (const a of razborArabic(f)) {
+      if (!source.includes(nfc(a))) errs.push(`${t}: арабского «${a.slice(0, 40)}…» нет в тексте статьи дословно`);
+    }
+  });
+  return errs;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
+    RAZBOR_TYPES, razborFile, razborFiles, razborShown, razborArabic, razborCounts, razborCheck,
     htmlPlain, searchRows, searchChapterTitle, searchIndex,
     parseFile, buildChapter, renderGroup, inlineMd, escapeHtml, sharhKey, glossaryAnchor,
     GLOSS_SKIP_TAGS, GLOSS_CLASSES, glossPlainText, glossWords, glossTokens,

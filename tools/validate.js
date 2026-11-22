@@ -9,7 +9,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { buildChapter, glossTokens, glossHash, parseGlossFile, sharhKey } = require(path.join(__dirname, '..', 'parser.js'));
+const { buildChapter, glossTokens, glossHash, parseGlossFile, sharhKey, razborFiles, razborCheck } = require(path.join(__dirname, '..', 'parser.js'));
 
 const dir = process.argv[2];
 if (!dir) {
@@ -48,6 +48,8 @@ let total = 0;
 if (sharhProblem) { console.log('    ⚠ ' + sharhProblem); total++; }
 const glossDone = [];      // что реально подписано
 const glossPending = [];   // объявлен слой подстрочника, а файла главы ещё нет
+const chapterSectors = new Map();   // номер главы с единицы → id её секторов (для «Ясного разбора»)
+let articleSource = '';             // весь текст записи подряд — сверять арабский разбора
 for (const ch of manifest.chapters) {
   // запись-группа (header) — заголовок без файла, читать нечего
   if (!ch.file) continue;
@@ -66,6 +68,8 @@ for (const ch of manifest.chapters) {
     }
   }
   const { pairs, warnings } = buildChapter(texts, manifest.languages);
+  chapterSectors.set(manifest.chapters.indexOf(ch) + 1, new Set(pairs.filter(p => p.type === 'text').map(p => p.id)));
+  articleSource += Object.values(texts).join('\n') + '\n';
   const fnCount = pairs.filter(p => p.type === 'footnote').length;
   const pages = [...new Set(pairs.map(p => p.page).filter(p => p != null))];
 
@@ -157,6 +161,22 @@ for (const ch of manifest.chapters) {
     console.log('    ⚠ ' + w);
     total++;
   }
+}
+
+/* «Ясный разбор» (SPEC 3.4h): кадры — выжимка статьи, поэтому сверяем их с ней: ссылки на
+   главы и секторы, картинки, и главное — арабский дословно из текста статьи. */
+for (const rf of razborFiles(manifest)) {
+  let data;
+  try { data = JSON.parse(fs.readFileSync(path.join(dir, rf), 'utf8')); }
+  catch (e) { console.log(`    ⚠ разбор ${rf} не читается: ${e.message}`); total++; continue; }
+  const errs = razborCheck(data, {
+    chapters: manifest.chapters,
+    sectors: c => chapterSectors.get(c) || null,
+    source: articleSource,
+    media: p => fs.existsSync(path.join(dir, p)),
+  });
+  console.log(`  разбор ${rf}: кадров ${(data.frames || []).length}${errs.length ? '' : ' ✓'}`);
+  for (const e of errs) { console.log(`    ⚠ разбор ${rf}: ${e}`); total++; }
 }
 
 if (glossDone.length) console.log(`  подстрочник — ${glossDone.join('; ')}`);
