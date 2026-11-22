@@ -91,5 +91,6 @@
         "ru": "Итог"
       }
     }
-  ]
+  ],
+  "razbor": "razbor.json"
 }
