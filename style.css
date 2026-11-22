@@ -2453,9 +2453,15 @@ body.toc-ready #chapter-title:not(:empty)::after { content: ' ▾'; color: var(-
 }
 
 /* ===== «Ясный разбор» (SPEC 3.4h): статья по шагам во весь экран =====
-   Листается как комикс, но кадр — вёрстка в теме читалки (светлая, сепия, тёмная), а не
-   картинка на тёмном фоне: текст читается, копируется и перекрашивается вместе с темой. */
+   Листается как комикс и, как комикс, всегда на тёмной сцене с золотом — при любой теме
+   читалки (решение автора 22.11.2026: «разбор в читалке сделай тёмным» — так дороже).
+   Кадр при этом вёрстка, а не картинка: текст читается и копируется. Палитра — своими
+   переменными на #razbor, поэтому всё внутри берёт её, а не цвета темы. */
 #razbor {
+  --bg: #121212; --fg: #ece6da; --muted: #a39b8e; --panel: #1c1c1c; --border: #2f2d29;
+  --accent: #c9a65b; --accent-soft: rgba(201, 166, 91, 0.2); --active-bg: rgba(201, 166, 91, 0.08);
+  --error: #e07070; --rz-ok: #6fbf83; --rz-on-accent: #141210;
+  color-scheme: dark;
   position: fixed; inset: 0; z-index: 2500; background: var(--bg); color: var(--fg);
   display: flex; flex-direction: column;
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
@@ -2531,11 +2537,11 @@ body.razbor-open { overflow: hidden; }
   font: inherit; text-align: left; cursor: pointer; color: var(--fg);
   background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 0.8rem 1rem; line-height: 1.4;
 }
-.rz-option.ok { border-color: #3b8a4f; background: rgba(59, 138, 79, 0.12); }
-.rz-option.wrong { border-color: var(--error); background: rgba(176, 48, 48, 0.09); }
+.rz-option.ok { border-color: var(--rz-ok); background: rgba(111, 191, 131, 0.12); }
+.rz-option.wrong { border-color: var(--error); background: rgba(224, 112, 112, 0.1); }
 .rz-why { margin: 0.8rem 0 0; line-height: 1.5; }
 .rz-why:empty { display: none; }
-.rz-why.ok b { color: #3b8a4f; }
+.rz-why.ok b { color: var(--rz-ok); }
 .rz-why.wrong b { color: var(--error); }
 .rz-links { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.9rem; }
 .rz-more {
@@ -2544,13 +2550,13 @@ body.razbor-open { overflow: hidden; }
 }
 .rz-end { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-top: 1.6rem; }
 .rz-end button { text-align: center; flex: 1 1 10rem; font-weight: 600; }
-.rz-end .rz-end-main { background: var(--accent); border-color: var(--accent); color: #fff; }
+.rz-end .rz-end-main { background: var(--accent); border-color: var(--accent); color: var(--rz-on-accent); }
 .rz-nav { display: flex; gap: 10px; padding: 8px 14px 14px; max-width: 36rem; width: 100%; margin: 0 auto; box-sizing: border-box; }
 .rz-nav button {
   flex: 1; font: inherit; font-weight: 600; cursor: pointer; border-radius: 12px; padding: 0.75rem;
   background: var(--panel); color: var(--fg); border: 1px solid var(--border);
 }
-#rz-next { background: var(--accent); border-color: var(--accent); color: #fff; }
+#rz-next { background: var(--accent); border-color: var(--accent); color: var(--rz-on-accent); }
 .rz-nav button:disabled { opacity: 0.35; cursor: default; }
 /* шапка статьи: «Ясный разбор · N мин» или «Кратко / Ясный разбор / Полностью» */
 .art-modes { margin: 0.9rem 0 0.2rem; }

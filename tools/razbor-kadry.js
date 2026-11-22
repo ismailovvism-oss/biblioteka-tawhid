@@ -6,10 +6,9 @@
  * для альбома в Telegram, обложки поста, ролика. Снимает настоящую читалку в Chrome без
  * окна, поэтому картинка — ровно то, что видит читатель (шрифты, арабский, тема).
  *
- *   node tools/razbor-kadry.js books/<id> <папка> [--тема light|sepia|dark|scena]
- *                              [--без check,next] [--подпись "tawhiid.com/kutub"]
+ *   node tools/razbor-kadry.js books/<id> <папка> [--без check,next] [--подпись "tawhiid.com/kutub"]
  *
- * --тема   light, sepia, dark — темы читалки; scena — тёмная сцена с золотом, как у комикса.
+ * Разбор в читалке всегда на тёмной сцене с золотом (style.css, #razbor) — снимок тот же.
  * --без    виды кадров, которые не снимать (по умолчанию check,next: в альбоме проверка —
  *          это опрос-викторина Telegram, а «дальше» — ссылка в подписи).
  * Снимок без кнопок листания и счётчика: в альбоме своя нумерация.
@@ -27,20 +26,16 @@ const { spawn } = require('child_process');
 const КОРЕНЬ = path.join(__dirname, '..');
 const арг = process.argv.slice(2);
 const опция = (имя, по) => { const i = арг.indexOf(имя); return i >= 0 ? арг.splice(i, 2)[1] : по; };
-const ТЕМА = опция('--тема', 'light');
 const БЕЗ = опция('--без', 'check,next').split(',').filter(Boolean);
 const ПОДПИСЬ = опция('--подпись', 'tawhiid.com/kutub');
 const [книга, куда] = арг;
 if (!книга || !куда) {
-  console.error('Использование: node tools/razbor-kadry.js books/<id> <папка> [--тема light|sepia|dark|scena] [--без check,next]');
+  console.error('Использование: node tools/razbor-kadry.js books/<id> <папка> [--без check,next]');
   process.exit(2);
 }
 const id = path.basename(path.resolve(книга));
 const W = 432, H = 540, DPR = 2.5;   // 1080×1350 — вертикальный кадр 4:5, на телефоне почти весь экран
 
-// Сцена: почти чёрный фон, тёплый светлый текст и золото — как комикс (3.4e) и проба ролика
-const СЦЕНА = `#razbor{--bg:#121212;--fg:#ece6da;--muted:#a39b8e;--panel:#1c1c1c;--border:#2f2d29;
-  --accent:#c9a65b;--accent-soft:rgba(201,166,91,.2);--active-bg:rgba(201,166,91,.08);--error:#e07070}`;
 const СНИМОК = `.rz-frame{animation:none!important}.rz-nav,#rz-close,#rz-count,#rz-bar,.rz-more,.rz-end{display:none!important}
   #rz-stage{overflow:hidden!important}
   #rz-brand{position:absolute;left:0;right:0;bottom:14px;text-align:center;font-size:12px;letter-spacing:.14em;
@@ -100,11 +95,9 @@ const ТИПЫ = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript;
       try { готово = await выполнить('typeof razborOpen === "function" && razborOpen() && !!rz.data'); } catch { /* грузится */ }
     }
     if (!готово) throw new Error(`разбор «${id}» не открылся — есть ли у записи razbor.json и поле в book.json?`);
-    const тема = ТЕМА === 'scena' ? 'dark' : ТЕМА;
     await выполнить(`(() => {
-      document.body.dataset.theme = ${JSON.stringify(тема)};
       const st = document.createElement('style');
-      st.textContent = ${JSON.stringify(СНИМОК + (ТЕМА === 'scena' ? СЦЕНА : ''))};
+      st.textContent = ${JSON.stringify(СНИМОК)};
       document.head.appendChild(st);
       const b = document.createElement('div'); b.id = 'rz-brand'; b.textContent = ${JSON.stringify(ПОДПИСЬ)};
       document.getElementById('razbor').appendChild(b);
@@ -132,7 +125,7 @@ const ТИПЫ = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript;
         `${лишнее > 2 || масштаб < 80 ? '  ⚠ кадр не помещается — сократить его текст' : ''}`);
     }
     ws.close();
-    console.log(`готово: ${снятые.length} кадров (${ТЕМА}) → ${куда}`);
+    console.log(`готово: ${снятые.length} кадров → ${куда}`);
   } finally {
     стоп();
   }
