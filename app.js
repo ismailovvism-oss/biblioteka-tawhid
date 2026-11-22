@@ -7212,7 +7212,13 @@ function offerReload(текст, кнопка) {
    дописываем место (оно сохраняется с задержкой), потом оставляем в адресе одну запись. */
 function reloadKeepingPlace() {
   try { saveSettings(); } catch { /* не вышло — перезагрузим как есть */ }
-  if (bookId) history.replaceState({}, '', '?book=' + encodeURIComponent(bookId));
+  if (bookId) {
+    /* Открытый «Ясный разбор» — тоже место. Без него «Обновить» из разбора возвращало в
+       статью: так и вышло 22.11.2026 по ссылке из Telegram (хозяин: «нажимаю, всё равно
+       статья»). Кадр берём живой, а не из адреса: адрес мог отстать. */
+    const кадр = razborOpen() && rz.data ? rz.i + 1 : null;
+    history.replaceState({}, '', '?book=' + encodeURIComponent(bookId) + (кадр ? '&razbor=' + кадр : ''));
+  }
   location.reload();
 }
 
