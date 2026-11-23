@@ -2348,6 +2348,9 @@ body.toc-ready #chapter-title:not(:empty)::after { content: ' ▾'; color: var(-
 /* «Что читать дальше» — под «Концом статьи» */
 .art-next { margin: 0.4rem 0 2rem; display: flex; flex-direction: column; gap: 0.55rem; }
 .art-next-h { margin: 0 0 0.1rem; font-size: 1.05rem; }
+/* подзаголовки групп — только когда у записи есть соседи «По этому вопросу» (поле related) */
+.art-next-sub { margin: 0.35rem 0 -0.15rem; color: var(--muted); font-size: 0.82rem; font-weight: 600; }
+.art-next-h + .art-next-sub { margin-top: 0; }
 .next-card {
   display: flex;
   align-items: center;

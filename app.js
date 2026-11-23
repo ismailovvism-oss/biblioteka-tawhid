@@ -554,9 +554,15 @@ function articleToc(разделы) {
   return box;
 }
 
-/* «Что читать дальше» — под «Концом статьи». Дочитал — и вместо тупика три шага на выбор:
-   следующая часть серии; непрочитанное из того же раздела; свежее непрочитанное. Отдельным
-   блоком ПОСЛЕ .art-end, а не внутри: по низу .art-end считается доля прочитанного. */
+/* «Что читать дальше» — под «Концом статьи». Дочитал — и вместо тупика несколько шагов на выбор:
+   следующая часть серии; соседние разборы «По этому вопросу»; непрочитанное из того же раздела;
+   свежее непрочитанное. Отдельным блоком ПОСЛЕ .art-end, а не внутри: по низу .art-end
+   считается доля прочитанного.
+   «По этому вопросу» (23.11.2026, SPEC 3.6) — поле "related" записи: соседей подобрал автор, у
+   каждого причина («тот же тавиль — в толковании текстов…»). Раздел и свежесть тему не ловят:
+   под «Фатихой за имамом» вставало «Мясо суфия-мушрика», общее у них — только «Ибадат». Соседи
+   показываются и прочитанными: их выбрал автор, а не счёт непрочитанного. Обратную связь читалка
+   не достраивает — у каждой стороны своя причина, её пишет автор. */
 function articleNext() {
   const я = bookEntry;
   if (!я) return null;
@@ -566,20 +572,25 @@ function articleNext() {
   const нечитанные = прочие.filter(e => readState(e) !== 'done')
     .sort((a, b) => (readState(a) === 'none' ? 0 : 1) - (readState(b) === 'none' ? 0 : 1) || свежее(a, b));
   const взято = new Set(), список = [];
-  const взять = (e, повод, главный) => {
+  const взять = (e, повод, главный, группа = '') => {
     if (!e || взято.has(e.id)) return;
     взято.add(e.id);
-    список.push({ e, повод, главный });
+    список.push({ e, повод, главный, группа });
   };
   const серия = seriesOf(я);
   if (серия && серия.part != null) {
     const след = серия.parts.find(e => e.id !== я.id && partOf(e) > серия.part);
     if (след) взять(след, `Серия «${серия.name}» · часть ${partOf(след)} из ${серия.of}`, true);
   }
+  for (const р of Array.isArray(я.related) ? я.related : []) {
+    const e = р && library.find(x => x.id === р.id && !x.draft && x.id !== я.id);
+    if (e) взять(e, String(р.why || '').trim() || 'По этому же вопросу', false, 'sosedi');
+  }
+  const соседей = список.filter(x => x.группа === 'sosedi').length;
   const путь = bookCatPath(я);
-  взять(нечитанные.find(e => !взято.has(e.id) && e.category === я.category), путь.length ? `Ещё в разделе «${путь[путь.length - 1]}»` : 'Ещё по теме');
+  взять(нечитанные.find(e => !взято.has(e.id) && e.category === я.category), путь.length ? `Ещё в разделе «${путь[путь.length - 1]}»` : 'Ещё по теме', false, 'eshche');
   const ещё = нечитанные.find(e => !взято.has(e.id));
-  if (ещё) взять(ещё, readState(ещё) === 'none' ? 'Вы ещё не читали' : 'Вы начали читать');
+  if (ещё) взять(ещё, readState(ещё) === 'none' ? 'Вы ещё не читали' : 'Вы начали читать', false, 'eshche');
   if (!список.length) return null;
 
   const box = document.createElement('section');
@@ -588,7 +599,17 @@ function articleNext() {
   h.className = 'art-next-h';
   h.textContent = 'Что читать дальше';
   box.appendChild(h);
-  for (const { e, повод, главный } of список) {
+  // подзаголовки — только когда есть соседи: без них блок выглядит как прежде
+  const подписи = { sosedi: 'По этому вопросу', eshche: 'Ещё' };
+  let группаБыла = '';
+  for (const { e, повод, главный, группа } of список) {
+    if (соседей && группа && группа !== группаБыла) {
+      const sub = document.createElement('h3');
+      sub.className = 'art-next-sub';
+      sub.textContent = подписи[группа];
+      box.appendChild(sub);
+    }
+    группаБыла = группа;
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'next-card' + (главный ? ' primary' : '');
@@ -607,7 +628,9 @@ function articleNext() {
     const m = document.createElement('span');
     m.className = 'next-meta';
     const st = readState(e);
-    m.textContent = [readTime(e), st === 'reading' ? 'читаю' : ''].filter(Boolean).join(' · ');
+    // у соседа видно, краткий это ответ или исследование: читатель выбирает и по объёму
+    m.textContent = [группа === 'sosedi' && isBrief(e) ? 'Краткий ответ' : '', readTime(e),
+      st === 'reading' ? 'читаю' : st === 'done' ? 'прочитано' : ''].filter(Boolean).join(' · ');
     main.append(why, t, m);
     b.append(thumb, main);
     b.addEventListener('click', () => openEntry(e));
