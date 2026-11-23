@@ -143,9 +143,14 @@ const TABLE_SEP_RE = /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/;
 const isTableRow = l => l.includes('|') && l.trim() !== '';
 
 // «| a | b |» → ['a','b']. Экранированная «\|» внутри ячейки остаётся символом.
+// ⚠️ Без «просмотра назад» в регулярке — (?<!…), (?<=…): Safari понимает его только с iOS 16.4,
+// а на старом iPhone из-за одной такой регулярки не загружался весь parser.js, и не открывалась
+// ни одна статья и книга (23.11.2026, iPhone с iOS ниже 16.4; приём стоял тут с 25.07). Поэтому
+// «\|» прячем за служебный знак, режем по «|» и возвращаем. Проверку несёт pages.yml.
+const ESC_PIPE = '';
 function splitRow(line) {
   const cells = line.trim().replace(/^\|/, '').replace(/\|$/, '')
-    .split(/(?<!\\)\|/).map(c => c.replace(/\\\|/g, '|').trim());
+    .replace(/\\\|/g, ESC_PIPE).split('|').map(c => c.split(ESC_PIPE).join('|').trim());
   return cells;
 }
 

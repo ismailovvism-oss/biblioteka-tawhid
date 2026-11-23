@@ -50,6 +50,9 @@ jobs:
           node --check contract.js
           node --check supabase/client.js
           node --check supabase/config.js
+          # старые iPhone (iOS 15): регулярка с (?<!…) в parser.js не давала открыть ни одной
+          # статьи с 25.07 по 23.11.2026 — такие приёмы не выкладываем
+          node tools/compat.js
           for b in books/*/; do
             [ -f "$b/book.json" ] || continue
             echo "--- $b"

@@ -389,11 +389,15 @@ async function loadArticle(ci, targetId) {
     loading = true;
     $('#chapter-title').textContent = 'Загрузка…';
     const моя = bookId;
-    const ок = await Promise.all(читаемые.map(k => loadChapterData(k).then(() => true, () => false)));
+    // Причину первой неудачи показываем читателю: «Не удалось загрузить статью.» без неё ничего не
+    // говорило (23.11.2026: на старом iPhone не загружался parser.js, а на снимке было не понять почему).
+    let причина = '';
+    const ок = await Promise.all(читаемые.map(k => loadChapterData(k).then(() => true,
+      err => { if (!причина) причина = (err && err.message) || String(err); return false; })));
     if (моя !== bookId || !book) return;   // пока грузилось, ушли на полку или в другую запись
     streamChapters = читаемые.filter((_, n) => ок[n]);
     if (!streamChapters.length) {
-      showLoadError('Не удалось загрузить статью.');
+      showLoadError('Не удалось загрузить статью' + (причина ? ': ' + причина : '.'));
       $('#chapter-title').textContent = pickTitle(book.title);
       loading = false;
       return;
@@ -4757,7 +4761,8 @@ function оценить(норм, запрос) {
     const первое = места.findIndex(где => где.length);
     const последнее = места.length - 1 - [...места].reverse().findIndex(где => где.length);
     вес = ВЕС.часть;
-    границы = отрезок(места[первое][0], места[последнее].at(-1));
+    const хвост = места[последнее];   // не .at(-1): его нет в Safari до iOS 15.4
+    границы = отрезок(места[первое][0], хвост[хвост.length - 1]);
   } else {
     const порядком = поПорядку(места);
     const любым = вЛюбомПорядке(места);
