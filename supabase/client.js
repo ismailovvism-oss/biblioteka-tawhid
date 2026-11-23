@@ -217,14 +217,14 @@ window.SB = (function () {
 
   /* Функция базы от имени анонима — для счётчика открытий (stat_hit, supabase/statistika.sql).
      Анонимно и у вошедшего: ради «+1» незачем светить свой токен, а протухший токен не
-     должен запускать обновление сессии на каждое открытие статьи. keepalive — запрос
-     доживает, даже если вкладку тут же закрыли. Не бросает: ответ — true/false. */
+     должен запускать обновление сессии на каждое открытие статьи. Без keepalive: события
+     шлются, пока страница открыта, а keepalive с предварительным CORS-запросом старые
+     браузеры (Safari, Firefox до 133) понимают по-разному. Не бросает: ответ — true/false. */
   async function anonRpc(name, args) {
     if (!configured()) return false;
     try {
       const res = await fetch(CFG.url + '/rest/v1/rpc/' + name, {
         method: 'POST',
-        keepalive: true,
         headers: headers({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(args || {}),
       });

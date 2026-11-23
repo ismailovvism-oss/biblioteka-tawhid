@@ -7182,8 +7182,13 @@ function statLoad() {
   for (const k of ['seen', 'done', 'open', 'useful']) if (!s[k] || typeof s[k] !== 'object') s[k] = {};
   return s;
 }
+/* Перед записью сливаем с сохранённым: в другой вкладке могли открыть или дочитать другую
+   запись, и запись целиком стёрла бы её отметки — тогда та же запись посчиталась бы снова. */
 function statSave() {
   const край = Date.now() - STAT_VISIT;
+  const там = statLoad();
+  for (const k of ['seen', 'done']) stat[k] = Object.assign({}, там[k], stat[k]);
+  for (const [id, ts] of Object.entries(там.open)) if (!(stat.open[id] >= ts)) stat.open[id] = ts;
   for (const [id, ts] of Object.entries(stat.open)) if (!(ts > край)) delete stat.open[id];
   try { localStorage.setItem(STAT_KEY, JSON.stringify(stat)); } catch { /* живём в памяти */ }
 }
@@ -7244,7 +7249,10 @@ function statFinished(id) {
 
 /* «Полезно» под статьёй — отклик без аккаунта: одно нажатие с устройства, повторное снимает.
    Число читателю не показываем — его видит хозяин в «Статистике». Где счётчик не работает
-   (устройство хозяина, localhost), кнопка только отмечается у себя, ничего не отправляя. */
+   (устройство хозяина, localhost), кнопка только отмечается у себя, ничего не отправляя.
+   stat.useful[id]: 2 — «+1» принят базой, 1 — отмечено только здесь. Отмену («−1») шлём
+   только за принятый «+1»: иначе хозяин, нажав у себя и потом вернув устройство в счёт,
+   снял бы чужую отметку. */
 function articleReact() {
   const e = bookEntry;
   if (!e || !backendReady() || e.private || e.local || e.draft) return null;
@@ -7265,14 +7273,16 @@ function articleReact() {
   };
   paint();
   b.addEventListener('click', async () => {
-    const on = !stat.useful[e.id];
-    if (statCounts(e)) {
+    const было = stat.useful[e.id];
+    const on = !было;
+    let принято = false;
+    if (statCounts(e) && (on || было === 2)) {
       b.disabled = true;
-      const ok = await SB.anonRpc('stat_hit', { p_book: e.id, p_event: on ? 'useful' : 'unuseful', p_source: statSrc.get(e.id) || 'lib' });
+      принято = await SB.anonRpc('stat_hit', { p_book: e.id, p_event: on ? 'useful' : 'unuseful', p_source: statSrc.get(e.id) || 'lib' });
       b.disabled = false;
-      if (!ok) { toast('Нет связи — отметка не сохранилась. Попробуйте позже.'); return; }
+      if (!принято) { toast('Нет связи — отметка не сохранилась. Попробуйте позже.'); return; }
     }
-    if (on) stat.useful[e.id] = 1; else delete stat.useful[e.id];
+    if (on) stat.useful[e.id] = принято ? 2 : 1; else delete stat.useful[e.id];
     statSave();
     paint();
   });
@@ -7308,8 +7318,10 @@ const STAT_SOURCES = [
   ['site', 'Сайт tawhiid.com'], ['lib', 'Из самой библиотеки'], ['other', 'Другие сайты'],
 ];
 let statDays = 30;
+let ssTick = 0;   // быстро переключили период — ответ на прежний не должен лечь поверх
 
 async function renderSiteStats() {
+  const my = ++ssTick;
   const body = $('#ss-body');
   $('#ss-me').checked = stat.me === true;
   for (const c of document.querySelectorAll('#ss-period .chip')) c.classList.toggle('active', Number(c.dataset.days) === statDays);
@@ -7321,13 +7333,16 @@ async function renderSiteStats() {
   try {
     [rows, days] = await Promise.all([SB.rest('rpc/stat_summary', post), SB.rest('rpc/stat_by_day', Object.assign({}, post))]);
   } catch (err) {
+    if (my !== ssTick) return;
     body.textContent = err.status === 404 || /stat_summary|stat_by_day|schema cache/i.test(err.message || '')
       ? 'Счётчик ещё не включён в базе: один раз выполните файл supabase/statistika.sql (Supabase → SQL Editor → Run).'
       : 'Не удалось загрузить статистику: ' + err.message;
     return;
   }
+  if (my !== ssTick) return;
   body.textContent = '';
-  const num = n => Number(n || 0).toLocaleString('ru-RU');
+  // «Полезно» за неделю бывает и отрицательным: нажали раньше, а сняли на этой неделе
+  const num = n => Math.max(0, Number(n || 0)).toLocaleString('ru-RU');
   // по записям; id не из каталога (удалённые записи, мусор) в суммы не берём
   const поЗаписям = new Map(), источники = {};
   let чужих = 0;
@@ -7410,7 +7425,7 @@ async function renderSiteStats() {
     m.className = 'ss-entry-meta';
     m.textContent = [`${num(z.opens)} ${plural(z.opens, 'открытие', 'открытия', 'открытий')}`,
       `${num(z.readers)} ${plural(z.readers, 'читатель', 'читателя', 'читателей')}`,
-      `дочитали ${num(z.finished)}`, z.useful ? `«Полезно» ${num(z.useful)}` : ''].filter(Boolean).join(' · ');
+      `дочитали ${num(z.finished)}`, z.useful > 0 ? `«Полезно» ${num(z.useful)}` : ''].filter(Boolean).join(' · ');
     row.append(t, bar, m);
     body.appendChild(row);
   }
