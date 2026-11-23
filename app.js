@@ -830,6 +830,8 @@ function renderChapter() {
   }
   if (текста || сноски.length) {
     stream.appendChild(singlePage ? articleEnd() : chapterEndNav());
+    const отклик = singlePage ? articleReact() : null;   // «Полезно» — после .art-end: по её низу считается доля
+    if (отклик) stream.appendChild(отклик);
     const дальше = singlePage ? articleNext() : null;
     if (дальше) stream.appendChild(дальше);
   }
@@ -1034,6 +1036,7 @@ function rememberPosition() {
   место.pct = bookPct;   // доля прочитанного: лента, ряд «Продолжить»
   место.done = doneAt(было) || (atEnd ? Date.now() : 0);   // чипы «Читаю / Прочитано»
   setLast(bookId, место);
+  if (atEnd) statFinished(bookId);
   if (posSaveTick) clearTimeout(posSaveTick);
   posSaveTick = setTimeout(saveSettings, 500);
 }
@@ -1258,6 +1261,7 @@ function comicRender() {
     место.done = doneAt(было) || (g >= comic.total - 1 ? Date.now() : 0);
   }
   setLast(bookId, место); saveSettings();
+  if (g >= comic.total - 1) statFinished(bookId);
 }
 async function comicGoto(ci, i) {
   comic.frames = await comicFrames(ci);
@@ -6837,6 +6841,7 @@ async function openBook(entry, opts = {}) {
   }
   if (!Array.isArray(book.rtl)) book.rtl = [];
   if (!book.title) book.title = { [book.languages[0]]: entry.id };
+  statOpen(entry);     // счётчик открытий: только «+1», в фоне, ничего не ждём
   /* Статья читается одной страницей. Комикс (`view: comic`) листается кадрами по главам —
      этот режим сильнее: статья-комикс остаётся комиксом. */
   singlePage = kindOf(entry) === 'article' && book.view !== 'comic';
@@ -7108,6 +7113,8 @@ async function renderAccount() {
   const user = await SB.currentUser();
   form.hidden = Boolean(user);
   out.hidden = !user;
+  $('#acc-stats').hidden = true;
+  if (user) statIsAdmin().then(да => { $('#acc-stats').hidden = !да; if (да) statCheckOwner(); });
   state.textContent = user
     ? `Вход выполнен${user.email ? ' — ' + user.email : ''}. Непубличные книги, доступные вам, показаны в библиотеке.`
     : 'Вход не выполнен.';
@@ -7154,6 +7161,284 @@ $('#acc-signout').addEventListener('click', async () => {
   toast('Вы вышли');
 });
 
+/* ===== счётчик открытий и «Полезно» (23.11.2026, BACKEND.md «Счётчик открытий») =====
+   Хозяину — сколько раз открывают статьи и книги, сколько людей их дочитывают и откуда
+   приходят. В базу уходит только «+1» к суммам за день (supabase/statistika.sql): ни cookie,
+   ни номера устройства, ни адреса. Новое ли это устройство для записи и дочитана ли она уже,
+   помнит само устройство (STAT_KEY) — отсюда «читатели» без слежки.
+   Не считаются: непубличные и черновые записи, роботы, разработка на localhost и
+   устройство хозяина (его вычитка смешалась бы с читательским счётом, см. statCheckOwner).
+   Всё здесь — побочное: молчащий бэкенд не должен ни задерживать, ни ронять чтение. */
+const STAT_KEY = 'chitalka:stat';
+const STAT_VISIT = 30 * 60 * 1000;   // снова открыл ту же запись в течение получаса — тот же заход
+let statFirst = true;               // первое открытие после загрузки страницы: откуда — по document.referrer
+const statSrc = new Map();          // id записи → откуда пришли в этот заход (для «дочитал» и «Полезно»)
+let stat = statLoad();
+
+function statLoad() {
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem(STAT_KEY) || 'null'); } catch { /* приватный режим */ }
+  s = s && typeof s === 'object' ? s : {};
+  for (const k of ['seen', 'done', 'open', 'useful']) if (!s[k] || typeof s[k] !== 'object') s[k] = {};
+  return s;
+}
+function statSave() {
+  const край = Date.now() - STAT_VISIT;
+  for (const [id, ts] of Object.entries(stat.open)) if (!(ts > край)) delete stat.open[id];
+  try { localStorage.setItem(STAT_KEY, JSON.stringify(stat)); } catch { /* живём в памяти */ }
+}
+
+// считается ли эта запись с этого устройства
+function statCounts(entry) {
+  if (!backendReady() || !entry || entry.private || entry.local || entry.draft) return false;
+  if (stat.me === true) return false;                                   // устройство хозяина
+  if (location.protocol === 'file:') return false;
+  // localhost — разработка и стенд; включить для проверки: stat.dev = true в chitalka:stat
+  if (/^(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)$/.test(location.hostname) && !stat.dev) return false;
+  if (navigator.webdriver || /bot|crawl|spider|slurp|headless|lighthouse|prerender/i.test(navigator.userAgent || '')) return false;
+  return /^[A-Za-z0-9_-]{1,80}$/.test(String(entry.id));
+}
+
+/* Откуда пришли. Переходы внутри читалки — «lib»; первое открытие после загрузки страницы —
+   по document.referrer. Пустой referrer — «прямой заход»: закладка, набранный адрес, а также
+   ссылка из приложения, которое адрес не передаёт (Telegram на телефоне часто такой). */
+function statSource() {
+  if (!statFirst) return 'lib';
+  let u;
+  try { u = new URL(document.referrer); } catch { return 'direct'; }
+  if (u.protocol === 'android-app:') return /telegram/i.test(u.hostname) ? 'tg' : 'other';
+  const h = u.hostname.replace(/^www\./, '');
+  if (/(^|\.)(t\.me|telegram\.me|telegram\.org|telegram\.dog)$/.test(h)) return 'tg';
+  if (/(^|\.)(google\.[a-z.]+|yandex\.[a-z.]+|ya\.ru|bing\.com|duckduckgo\.com|yahoo\.com|go\.mail\.ru|ecosia\.org)$/.test(h)) return 'search';
+  if (h === location.hostname.replace(/^www\./, '')) {
+    return u.pathname.startsWith(location.pathname.replace(/[^/]*$/, '')) ? 'lib' : 'site';
+  }
+  if (/(^|\.)tawhiid\.com$/.test(h)) return 'site';
+  return 'other';
+}
+
+// открыли запись (openBook, манифест уже загружен)
+function statOpen(entry) {
+  const source = statSource();
+  statFirst = false;
+  if (!statCounts(entry)) return;
+  const id = entry.id, now = Date.now();
+  const тотЖе = stat.open[id] > now - STAT_VISIT;
+  stat.open[id] = now;   // окно скользит: ходит туда-обратно по «Что читать дальше» — один заход
+  statSave();
+  if (тотЖе) return;
+  statSrc.set(id, source);
+  const нов = !stat.seen[id];
+  // «уже видело» — только когда база приняла: иначе офлайн-открытие съело бы читателя
+  SB.anonRpc('stat_hit', { p_book: id, p_event: 'open', p_source: source, p_new: нов })
+    .then(ok => { if (ok && нов) { stat.seen[id] = 1; statSave(); } });
+}
+
+// дочитали до конца (rememberPosition, комикс — последний кадр); с устройства — один раз
+function statFinished(id) {
+  if (!id || stat.done[id] || !bookEntry || bookEntry.id !== id || !statCounts(bookEntry)) return;
+  stat.done[id] = 1;   // сразу, без отката: зовут на каждом шаге прокрутки, повторять незачем
+  statSave();
+  SB.anonRpc('stat_hit', { p_book: id, p_event: 'finished', p_source: statSrc.get(id) || 'lib' });
+}
+
+/* «Полезно» под статьёй — отклик без аккаунта: одно нажатие с устройства, повторное снимает.
+   Число читателю не показываем — его видит хозяин в «Статистике». Где счётчик не работает
+   (устройство хозяина, localhost), кнопка только отмечается у себя, ничего не отправляя. */
+function articleReact() {
+  const e = bookEntry;
+  if (!e || !backendReady() || e.private || e.local || e.draft) return null;
+  const box = document.createElement('section');
+  box.className = 'art-react';
+  const q = document.createElement('span');
+  q.className = 'art-react-q';
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'react-btn';
+  const краткий = isBrief(e);
+  const paint = () => {
+    const on = Boolean(stat.useful[e.id]);
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    icoLabel(b, 'heart', 'Полезно');
+    q.textContent = on ? 'Спасибо, что отметили!' : (краткий ? 'Ответ был полезен?' : 'Статья была полезна?');
+  };
+  paint();
+  b.addEventListener('click', async () => {
+    const on = !stat.useful[e.id];
+    if (statCounts(e)) {
+      b.disabled = true;
+      const ok = await SB.anonRpc('stat_hit', { p_book: e.id, p_event: on ? 'useful' : 'unuseful', p_source: statSrc.get(e.id) || 'lib' });
+      b.disabled = false;
+      if (!ok) { toast('Нет связи — отметка не сохранилась. Попробуйте позже.'); return; }
+    }
+    if (on) stat.useful[e.id] = 1; else delete stat.useful[e.id];
+    statSave();
+    paint();
+  });
+  box.append(q, b);
+  return box;
+}
+
+/* Устройство хозяина в счёт не идёт. Вошёл и стоит в списке тех, кому видна статистика, —
+   значит, это он: запоминаем раз и навсегда (stat.me). Галочка в окне «Статистика» может
+   вернуть устройство в счёт (stat.me = false) — тогда решение его, и здесь не трогаем. */
+async function statCheckOwner() {
+  if (!backendReady() || stat.me != null) return false;
+  try {
+    if (!(await SB.isSignedIn())) return false;
+    const rows = await SB.rest('stat_admins?select=user_id&limit=1');
+    if (Array.isArray(rows) && rows.length) { stat.me = true; statSave(); return true; }
+  } catch { /* таблицы ещё нет (statistika.sql не выполнен) — не беда */ }
+  return false;
+}
+// видна ли вошедшему статистика (кнопка в окне «Аккаунт»)
+async function statIsAdmin() {
+  try {
+    const rows = await SB.rest('stat_admins?select=user_id&limit=1');
+    return Array.isArray(rows) && rows.length > 0;
+  } catch { return false; }
+}
+
+/* ===== окно «Сколько читают» — только для хозяина =====
+   Суммы считает база (stat_summary, stat_by_day): строк по дням со временем станет больше,
+   чем PostgREST отдаёт за один ответ. Права решает RLS — постороннему придёт пусто. */
+const STAT_SOURCES = [
+  ['tg', 'Telegram'], ['direct', 'Прямой заход'], ['search', 'Поиск'],
+  ['site', 'Сайт tawhiid.com'], ['lib', 'Из самой библиотеки'], ['other', 'Другие сайты'],
+];
+let statDays = 30;
+
+async function renderSiteStats() {
+  const body = $('#ss-body');
+  $('#ss-me').checked = stat.me === true;
+  for (const c of document.querySelectorAll('#ss-period .chip')) c.classList.toggle('active', Number(c.dataset.days) === statDays);
+  body.textContent = 'Загрузка…';
+  const from = statDays ? new Date(Date.now() - (statDays - 1) * 864e5).toISOString().slice(0, 10) : null;
+  const args = JSON.stringify({ p_from: from });
+  const post = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: args };
+  let rows, days;
+  try {
+    [rows, days] = await Promise.all([SB.rest('rpc/stat_summary', post), SB.rest('rpc/stat_by_day', Object.assign({}, post))]);
+  } catch (err) {
+    body.textContent = err.status === 404 || /stat_summary|stat_by_day|schema cache/i.test(err.message || '')
+      ? 'Счётчик ещё не включён в базе: один раз выполните файл supabase/statistika.sql (Supabase → SQL Editor → Run).'
+      : 'Не удалось загрузить статистику: ' + err.message;
+    return;
+  }
+  body.textContent = '';
+  const num = n => Number(n || 0).toLocaleString('ru-RU');
+  // по записям; id не из каталога (удалённые записи, мусор) в суммы не берём
+  const поЗаписям = new Map(), источники = {};
+  let чужих = 0;
+  const итог = { opens: 0, readers: 0, finished: 0, useful: 0 };
+  for (const r of rows || []) {
+    const e = library.find(x => x.id === r.book_id);
+    if (!e) { чужих++; continue; }
+    const z = поЗаписям.get(r.book_id) || { e, opens: 0, readers: 0, finished: 0, useful: 0 };
+    for (const k of Object.keys(итог)) { z[k] += Number(r[k] || 0); итог[k] += Number(r[k] || 0); }
+    источники[r.source] = (источники[r.source] || 0) + Number(r.opens || 0);
+    поЗаписям.set(r.book_id, z);
+  }
+  if (!итог.opens && !итог.useful) {
+    const p = document.createElement('p');
+    p.className = 'stat-note';
+    p.textContent = statDays ? 'За этот срок открытий не было.' : 'Пока ни одного открытия: счётчик включился недавно.';
+    body.appendChild(p);
+    return;
+  }
+  // четыре главных числа
+  const tiles = document.createElement('div');
+  tiles.className = 'ss-tiles';
+  for (const [k, подпись] of [['opens', 'открытий'], ['readers', 'читателей'], ['finished', 'дочитали'], ['useful', '«Полезно»']]) {
+    const t = document.createElement('div');
+    t.className = 'ss-tile';
+    const b = document.createElement('b'); b.textContent = num(итог[k]);
+    const s = document.createElement('span'); s.textContent = подпись;
+    t.append(b, s);
+    tiles.appendChild(t);
+  }
+  body.appendChild(tiles);
+
+  // по дням — столбики открытий
+  if (Array.isArray(days) && days.length > 1) {
+    const h = document.createElement('h3'); h.className = 'sheet-sub'; h.textContent = 'Открытия по дням';
+    const bars = document.createElement('div');
+    bars.className = 'ss-bars';
+    const max = Math.max(1, ...days.map(d => Number(d.opens || 0)));
+    for (const d of days.slice(-90)) {
+      const bar = document.createElement('span');
+      bar.style.height = Math.max(2, Math.round(Number(d.opens || 0) / max * 100)) + '%';
+      bar.title = `${new Date(d.day + 'T00:00:00Z').toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', timeZone: 'UTC' })}: ${num(d.opens)}`;
+      bars.appendChild(bar);
+    }
+    body.append(h, bars);
+  }
+
+  // откуда приходят
+  const всего = Object.values(источники).reduce((a, b) => a + b, 0);
+  if (всего) {
+    const h = document.createElement('h3'); h.className = 'sheet-sub'; h.textContent = 'Откуда приходят';
+    body.appendChild(h);
+    for (const [k, имя] of STAT_SOURCES) {
+      if (!источники[k]) continue;
+      const row = document.createElement('div');
+      row.className = 'stat-row';
+      const a = document.createElement('span'); a.textContent = имя;
+      const b = document.createElement('b'); b.textContent = `${Math.round(источники[k] / всего * 100)}% · ${num(источники[k])}`;
+      row.append(a, b);
+      body.appendChild(row);
+    }
+  }
+
+  // записи — по числу открытий
+  const h = document.createElement('h3'); h.className = 'sheet-sub'; h.textContent = 'Статьи и книги';
+  body.appendChild(h);
+  const список = [...поЗаписям.values()].sort((a, b) => b.opens - a.opens || b.readers - a.readers);
+  const max = Math.max(1, ...список.map(z => z.opens));
+  for (const z of список) {
+    const row = document.createElement('div');
+    row.className = 'ss-entry';
+    const t = document.createElement('div');
+    t.className = 'ss-entry-title';
+    t.dir = 'auto';
+    setTextSlw(t, entryLabel(z.e));
+    const bar = document.createElement('div');
+    bar.className = 'ss-entry-bar';
+    bar.style.width = Math.round(z.opens / max * 100) + '%';
+    const m = document.createElement('div');
+    m.className = 'ss-entry-meta';
+    m.textContent = [`${num(z.opens)} ${plural(z.opens, 'открытие', 'открытия', 'открытий')}`,
+      `${num(z.readers)} ${plural(z.readers, 'читатель', 'читателя', 'читателей')}`,
+      `дочитали ${num(z.finished)}`, z.useful ? `«Полезно» ${num(z.useful)}` : ''].filter(Boolean).join(' · ');
+    row.append(t, bar, m);
+    body.appendChild(row);
+  }
+  if (чужих) {
+    const p = document.createElement('p');
+    p.className = 'stat-note';
+    p.textContent = `Ещё ${чужих} ${plural(чужих, 'строка', 'строки', 'строк')} — записи, которых нет в каталоге (удалённые или переименованные); в суммы не вошли.`;
+    body.appendChild(p);
+  }
+}
+
+$('#acc-stats').addEventListener('click', () => {
+  $('#account').hidden = true;
+  openOverlay($('#sitestats'));
+  renderSiteStats();
+});
+$('#ss-period').addEventListener('click', e => {
+  const c = e.target.closest('.chip');
+  if (!c || Number(c.dataset.days) === statDays) return;
+  statDays = Number(c.dataset.days);
+  renderSiteStats();
+});
+$('#ss-me').addEventListener('change', e => {
+  stat.me = e.target.checked;
+  statSave();
+  toast(stat.me ? 'Это устройство не считается' : 'Открытия с этого устройства снова считаются');
+});
+
 /* ===== старт ===== */
 /* Место в тексте читалка помнит и восстанавливает сама (settings.last), а на полке всегда
    встаёт наверх. Браузерное восстановление прокрутки при шаге по истории только мешает:
@@ -7191,6 +7476,7 @@ async function init() {
   const params = new URLSearchParams(location.search);
   const нужна = params.get('book') || params.get('info');
   const послеНепубличных = refreshLibrary().then(изменилась => { if (изменилась) onLibraryChanged(); });
+  statCheckOwner();   // вошёл хозяин — его устройство в счёт открытий не идёт (не ждём)
   if (нужна && !staticLibrary.some(b => b.id === нужна)) {
     /* Причин две, и обе проверяем, прежде чем показать полку вместо записи: реестр на
        устройстве устарел или запись непубличная. На всё — короткий срок (WANTED_WAIT):

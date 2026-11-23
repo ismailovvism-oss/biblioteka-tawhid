@@ -215,10 +215,27 @@ window.SB = (function () {
     return await authHeaders(Object.assign({ 'Content-Type': 'application/json' }, extra));
   }
 
+  /* Функция базы от имени анонима — для счётчика открытий (stat_hit, supabase/statistika.sql).
+     Анонимно и у вошедшего: ради «+1» незачем светить свой токен, а протухший токен не
+     должен запускать обновление сессии на каждое открытие статьи. keepalive — запрос
+     доживает, даже если вкладку тут же закрыли. Не бросает: ответ — true/false. */
+  async function anonRpc(name, args) {
+    if (!configured()) return false;
+    try {
+      const res = await fetch(CFG.url + '/rest/v1/rpc/' + name, {
+        method: 'POST',
+        keepalive: true,
+        headers: headers({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(args || {}),
+      });
+      return res.ok;
+    } catch { return false; }
+  }
+
   return {
     configured, isSignedIn, currentUser,
     sendMagicLink, consumeAuthCallback, signOut,
-    rest, signedUrl,
+    rest, signedUrl, anonRpc,
     functionUrl, functionHeaders,
   };
 })();
